@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Strategy Lab</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/vendor/codemirror.css">
+<link rel="stylesheet" href="/static/vendor/uplot.css">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Strategy Lab</h1>
+  <select id="strategySel" title="load strategy"></select>
+  <input id="saveName" placeholder="save as..." spellcheck="false">
+  <button id="saveBtn">Save</button>
+  <span class="spacer"></span>
+  <select id="datasetSel" title="dataset"></select>
+  <select id="rangeSel" title="range">
+    <option value="1440">1 day</option>
+    <option value="10080">1 week</option>
+    <option value="43200" selected>30 days</option>
+    <option value="129600">90 days</option>
+    <option value="525600">1 year</option>
+    <option value="0">all</option>
+  </select>
+  <button id="runBtn" class="primary">Run &#9654;</button>
+  <span id="engineBadge" class="badge">engine: ?</span>
+</header>
+
+<main>
+  <section id="left">
+    <div id="aiPanel">
+      <div class="sweepRow">
+        <input id="ideaInput" class="grow" placeholder="describe a strategy idea in plain English..." spellcheck="false">
+        <button id="ideaBtn" class="primary">Generate</button>
+      </div>
+      <div class="sweepRow">
+        <input id="improveInput" class="grow" placeholder='refine the open strategy, e.g. "add a volume filter"...' spellcheck="false">
+        <button id="improveBtn">Improve</button>
+        <select id="historySel" title="version history"><option value="">history</option></select>
+      </div>
+      <div id="aiMsg"></div>
+    </div>
+    <div id="editorWrap">
+      <textarea id="editor"></textarea>
+      <div id="diffPanel" style="display:none">
+        <div id="diffHeader">Claude proposes: <span class="spacer"></span>
+          <button id="diffAccept" class="primary">Accept</button>
+          <button id="diffReject">Reject</button>
+        </div>
+        <div id="diffBody"></div>
+      </div>
+      <div id="compileMsg" class="ok"></div>
+    </div>
+    <div id="paramsPanel"><h3>Params</h3><div id="paramInputs"></div>
+      <label class="autorun"><input type="checkbox" id="autoRun" checked> re-run on param change</label>
+    </div>
+    <div id="sweepPanel"><h3>GPU sweep</h3>
+      <div class="sweepRow">
+        <label>x</label><select id="sweepX"></select>
+        <label>y</label><select id="sweepY"><option value="">-</option></select>
+        <label>steps</label><input id="sweepSteps" type="number" value="30" min="3" max="200">
+      </div>
+      <div class="sweepRow">
+        <label>metric</label>
+        <select id="sweepMetric">
+          <option value="sharpe" selected>sharpe</option>
+          <option value="total_return">total return</option>
+          <option value="max_dd">max drawdown</option>
+          <option value="n_trades">trades</option>
+        </select>
+        <label>walk-fwd folds</label>
+        <select id="sweepFolds">
+          <option value="0" selected>off</option>
+          <option value="3">3</option><option value="4">4</option><option value="6">6</option>
+        </select>
+        <button id="sweepBtn" class="primary">Sweep</button>
+      </div>
+      <div id="sweepInfo"></div>
+    </div>
+    <div id="metricsPanel"><h3>Metrics</h3><table id="metricsTable"></table></div>
+    <div id="evolvePanel"><h3>Evolution</h3>
+      <div class="sweepRow">
+        <label>pop</label><input id="evoPop" type="number" value="24" min="6" max="128">
+        <label>gens</label><input id="evoGens" type="number" value="10" min="1" max="200">
+        <label>folds</label><input id="evoFolds" type="number" value="3" min="2" max="8">
+        <button id="evoStartBtn" class="primary">Evolve</button>
+        <button id="evoStopBtn" style="display:none">Stop</button>
+      </div>
+      <div class="sweepRow">
+        <label title="Claude proposes novel strategies every few generations">
+          <input type="checkbox" id="evoLlm"> Claude novelty</label>
+        <input id="evoHint" class="grow" placeholder="optional hint, e.g. explore exit-logic variations" spellcheck="false">
+      </div>
+      <div id="evoStatus"></div>
+      <div id="evoPopList"></div>
+    </div>
+  </section>
+  <section id="right">
+    <div class="chartBox"><div class="chartTitle">Price &amp; trades</div><div id="priceChart"></div></div>
+    <div class="chartBox"><div class="chartTitle">Equity</div><div id="equityChart"></div></div>
+    <div class="chartBox" id="sweepBox" style="display:none">
+      <div class="chartTitle" id="sweepTitle">Sweep</div>
+      <div id="sweepChart"></div>
+      <div id="sweepTip"></div>
+      <div id="sweepCaption"></div>
+    </div>
+    <div id="tradesPanel"><h3>Trades <span id="tradeCount"></span></h3>
+      <div id="tradesScroll"><table id="tradesTable"></table></div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/vendor/codemirror.js"></script>
+<script src="/static/vendor/simple-mode.js"></script>
+<script src="/static/vendor/uplot.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

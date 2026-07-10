@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+data/cache/
+data/raw/
+build/
+*.pyd
+*.exp
+*.lib
+.pytest_cache/
+lab/library/*.json

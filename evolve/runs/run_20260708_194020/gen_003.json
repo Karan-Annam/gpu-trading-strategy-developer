@@ -1,0 +1,179 @@
+[
+ {
+  "src": "param p1 = 14 in [5, 42]\nparam p2 = 0.03 in [0.0075, 0.12]\nparam p3 = 0.5 in [0.1875, 0.5]\n\nlet r = rsi(close, p1)\nenter_long when crossover(r, 30)\nexit_long when crossover(r, 70)\nset stop_loss = p2\nset size = p3\n",
+  "fitness": -4.267067830629932,
+  "q75_score": -4.233067830629932,
+  "best_row_score": -1.3424917218002368,
+  "best_params": {
+   "p1": 39.99100875854492,
+   "p2": 0.11093387007713318,
+   "p3": 0.22759689390659332
+  },
+  "median_oos_trades": 21.0,
+  "mean_oos_sharpe": -16.61753157789659,
+  "n_ops": 17
+ },
+ {
+  "src": "param p1 = 12.606276 in [4, 38]\nparam p2 = 0.03 in [0.0075, 0.12]\nparam p3 = 0.5 in [0.1875, 0.5]\n\nlet r = rsi(close, p1)\nenter_long when crossover(r, 30)\nexit_long when crossover(r, 70)\nset stop_loss = p2\nset size = p3\n",
+  "fitness": -5.029615547125972,
+  "q75_score": -4.995615547125972,
+  "best_row_score": -1.4740016738956387,
+  "best_params": {
+   "p1": 36.403839111328125,
+   "p2": 0.030278924852609634,
+   "p3": 0.2674354314804077
+  },
+  "median_oos_trades": 30.0,
+  "mean_oos_sharpe": -21.3150482569078,
+  "n_ops": 17
+ },
+ {
+  "src": "param p1 = 5 in [2, 15]\nparam p2 = 5 in [2, 15]\nparam p3 = 8 in [3, 24]\nparam p4 = 8 in [3, 24]\n\nenter_long when crossover(open, sma(close, p1))\nexit_long when ema(close, p2) > sma(close, p3) and crossunder(rsi(close, p4), 31)\nset stop_loss = 0.0504\nset take_profit = 0.1459\n",
+  "fitness": -5.082886070602572,
+  "q75_score": -5.036886070602572,
+  "best_row_score": -4.6863413681889865,
+  "best_params": {
+   "p1": 8.785355567932129,
+   "p2": 8.233396530151367,
+   "p3": 13.264846801757812,
+   "p4": 12.735991477966309
+  },
+  "median_oos_trades": 11.0,
+  "mean_oos_sharpe": -28.189814700020683,
+  "n_ops": 23
+ },
+ {
+  "src": "param p1 = 80 in [27, 240]\nparam p2 = 29 in [10, 87]\nparam p3 = 3 in [2, 9]\nparam p4 = 26 in [9, 78]\n\nenter_long when sma(close, p1) > delay(close, p2)\nexit_long when crossover(delay(close, p3), delay(close, p4)) and roc(close, 120) > 0.0257\nset stop_loss = 0.0236\n",
+  "fitness": -5.407633841639537,
+  "q75_score": -5.359633841639537,
+  "best_row_score": -4.6683849553134635,
+  "best_params": {
+   "p1": 72.5259780883789,
+   "p2": 19.034820556640625,
+   "p3": 5.994810581207275,
+   "p4": 28.792648315429688
+  },
+  "median_oos_trades": 5.0,
+  "mean_oos_sharpe": -5.198647255849356,
+  "n_ops": 24
+ },
+ {
+  "src": "param p1 = 12.606276 in [4, 38]\nparam p2 = 0.03 in [0.0075, 0.12]\nparam p3 = 0.5 in [0.1875, 0.5]\nparam p4 = 0.0527 in [0.013175, 0.2108]\n\nlet r = rsi(close, p1)\nenter_long when crossover(r, 30)\nexit_long when crossover(r, 70)\nset stop_loss = p2\nset size = p3\nset trail_stop = p4\n",
+  "fitness": -5.552512321329521,
+  "q75_score": -5.514512321329521,
+  "best_row_score": -0.7543787207142028,
+  "best_params": {
+   "p1": 36.61414337158203,
+   "p2": 0.01805330067873001,
+   "p3": 0.32935500144958496,
+   "p4": 0.10146332532167435
+  },
+  "median_oos_trades": 28.0,
+  "mean_oos_sharpe": -21.917743246061633,
+  "n_ops": 19
+ },
+ {
+  "src": "param p1 = 12.606276 in [4, 38]\nparam p2 = 0.03 in [0.0075, 0.12]\nparam p3 = 0.5 in [0.1875, 0.5]\nparam p4 = 0.0891 in [0.022275, 0.3564]\n\nlet r = rsi(close, p1)\nenter_long when crossover(r, 30)\nexit_long when crossover(r, 70)\nset stop_loss = p2\nset size = p3\nset trail_stop = p4\n",
+  "fitness": -5.70788864039249,
+  "q75_score": -5.6698886403924895,
+  "best_row_score": -1.7557856436100294,
+  "best_params": {
+   "p1": 36.23027420043945,
+   "p2": 0.08175595104694366,
+   "p3": 0.19496768712997437,
+   "p4": 0.3482954204082489
+  },
+  "median_oos_trades": 30.0,
+  "mean_oos_sharpe": -21.53121143669793,
+  "n_ops": 19
+ },
+ {
+  "src": "param p1 = 5 in [2, 15]\nparam p2 = 0.0504 in [0.0126, 0.2016]\nparam p3 = 0.1459 in [0.036475, 0.5]\n\nenter_long when crossover(open, sma(close, p1))\nexit_long when close < low\nset stop_loss = p2\nset take_profit = p3\n",
+  "fitness": -6.529471913171428,
+  "q75_score": -4.501471913171429,
+  "best_row_score": -4.463220467853277,
+  "best_params": {
+   "p1": 8.081476211547852,
+   "p2": 0.09371447563171387,
+   "p3": 0.04879072681069374
+  },
+  "median_oos_trades": 1.0,
+  "mean_oos_sharpe": -4.031285379872178,
+  "n_ops": 14
+ },
+ {
+  "src": "param p1 = 50 in [17, 150]\nparam p2 = 5 in [2, 15]\nparam p3 = 8 in [3, 24]\nparam p4 = 0.0217 in [0.005425, 0.0868]\n\nenter_long when crossunder(rsi(close, p1), 31)\nexit_long when ema(close, p2) < sma(close, p3)\nset stop_loss = p4\n",
+  "fitness": -9.783804546791039,
+  "q75_score": -7.751804546791038,
+  "best_row_score": -1.4209601302392647,
+  "best_params": {
+   "p1": 127.16403198242188,
+   "p2": 13.607903480529785,
+   "p3": 3.543987989425659,
+   "p4": 0.04603692889213562
+  },
+  "median_oos_trades": 4.0,
+  "mean_oos_sharpe": -16.373226972541424,
+  "n_ops": 16
+ },
+ {
+  "src": "param p1 = 50 in [17, 150]\nparam p2 = 300 in [100, 900]\nparam p3 = 5 in [2, 15]\nparam p4 = 8 in [3, 24]\n\nenter_long when crossunder(rsi(close, p1), 31) or crossunder(rsi(close, p2), 68)\nexit_long when ema(close, p3) > sma(close, p4)\nset stop_loss = 0.0217\n",
+  "fitness": -11.398797426411543,
+  "q75_score": -9.354797426411542,
+  "best_row_score": -3.457092229416383,
+  "best_params": {
+   "p1": 124.10027313232422,
+   "p2": 833.3815307617188,
+   "p3": 4.0086565017700195,
+   "p4": 20.531099319458008
+  },
+  "median_oos_trades": 3.0,
+  "mean_oos_sharpe": -12.158874229951339,
+  "n_ops": 22
+ },
+ {
+  "src": "param p1 = 14 in [5, 42]\nparam p2 = 11 in [4, 33]\nparam p3 = 8 in [3, 24]\nparam p4 = 50 in [17, 150]\n\nlet r = rsi(close, p1)\nenter_long when delay(close, p2) > highest(high, p3) or roc(close, p4) > (-0.0091)\nexit_long when crossover(r, 70)\nset stop_loss = 0.03\nset size = 0.75\n",
+  "fitness": -12.809344758656694,
+  "q75_score": -12.751344758656694,
+  "best_row_score": -7.6588221855942615,
+  "best_params": {
+   "p1": 41.296695709228516,
+   "p2": 18.034988403320312,
+   "p3": 15.901313781738281,
+   "p4": 44.359413146972656
+  },
+  "median_oos_trades": 70.0,
+  "mean_oos_sharpe": -37.29095537493927,
+  "n_ops": 29
+ },
+ {
+  "src": "param p1 = 120 in [40, 360]\nparam p2 = 5 in [2, 15]\nparam p3 = 5 in [2, 15]\nparam p4 = 8 in [3, 24]\n\nenter_long when roc(close, p1) > (-0.0086)\nexit_long when close - sma(close, p2) > 1.72 * atr(p3) or rsi(close, p4) < 33\nset trail_stop = 0.0796\n",
+  "fitness": -235.25833025928858,
+  "q75_score": -235.2003302592886,
+  "best_row_score": -97.02651916220947,
+  "best_params": {
+   "p1": 353.39874267578125,
+   "p2": 3.2074472904205322,
+   "p3": 9.134449005126953,
+   "p4": 22.00752830505371
+  },
+  "median_oos_trades": 1441.0,
+  "mean_oos_sharpe": -270.60485207914104,
+  "n_ops": 29
+ },
+ {
+  "src": "param p1 = 5 in [2, 15]\nparam p2 = 5 in [2, 15]\nparam p3 = 8 in [3, 24]\nparam p4 = 0.0217 in [0.005425, 0.0868]\n\nenter_long when crossover(open, sma(close, p1))\nexit_long when ema(close, p2) > sma(close, p3)\nset stop_loss = p4\n",
+  "fitness": -259.4876830321462,
+  "q75_score": -259.45768303214624,
+  "best_row_score": -218.9639990517105,
+  "best_params": {
+   "p1": 13.37974739074707,
+   "p2": 6.183408737182617,
+   "p3": 20.538637161254883,
+   "p4": 0.07410120964050293
+  },
+  "median_oos_trades": 1411.0,
+  "mean_oos_sharpe": -305.59603928074694,
+  "n_ops": 15
+ }
+]

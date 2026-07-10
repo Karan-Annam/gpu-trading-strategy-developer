@@ -1,0 +1,245 @@
+"""Evolution loop: population of strategy ASTs, GPU-swept fitness, tournament
+selection. Usable as a library (the Lab drives it on a thread) or as a CLI:
+
+    python -m evolve.loop --symbol BTCUSDT --bars 200000 --pop 32 --gens 15
+"""
+
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import random
+import sys
+import time
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dsl.compiler import compile_source                # noqa: E402
+from evolve import genome, sweep                       # noqa: E402
+
+RUNS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs")
+SEED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "strategies")
+
+COMPLEXITY_PENALTY = 0.002     # per bytecode op
+MIN_TRADES_PER_FOLD = 5
+NO_TRADE_PENALTY = 2.0
+
+
+class Individual:
+    def __init__(self, strat, src: str):
+        self.strat = strat            # param-free AST (genome)
+        self.src = src                # parameterized, compilable source
+        self.fitness: float | None = None
+        self.stats: dict = {}
+
+    def to_json(self) -> dict:
+        return {"src": self.src, "fitness": self.fitness, **self.stats}
+
+
+def evaluate(ind: Individual, bars, n_param_samples: int, n_folds: int,
+             rng_seed: int, prefer_gpu: bool = True) -> None:
+    prog = compile_source(ind.src)
+    pm = sweep.lhs_sample(prog, n_param_samples, seed=rng_seed)
+    if prog.params:
+        defaults = np.asarray([prog.param_defaults()], dtype=np.float32)
+        pm = np.vstack([defaults, pm])
+    _, test = sweep.fold_metrics(prog, bars, pm, n_folds=n_folds,
+                                 prefer_gpu=prefer_gpu)
+    scores = sweep.robust_score(test)                       # (N,)
+    med_trades = float(np.median(test[:, :, sweep.COL["n_trades"]]))
+    q75 = float(np.quantile(scores, 0.75))
+    fitness = q75 - COMPLEXITY_PENALTY * len(prog.code)
+    if med_trades < MIN_TRADES_PER_FOLD:
+        fitness -= NO_TRADE_PENALTY
+    best_row = int(np.argmax(scores))
+    ind.fitness = float(fitness)
+    ind.stats = {
+        "q75_score": q75,
+        "best_row_score": float(scores[best_row]),
+        "best_params": {p["name"]: float(pm[best_row, j])
+                        for j, p in enumerate(prog.params)},
+        "median_oos_trades": med_trades,
+        "mean_oos_sharpe": float(test[:, :, sweep.COL["sharpe"]].mean()),
+        "n_ops": len(prog.code),
+    }
+
+
+def seed_population(rng: random.Random, pop_size: int) -> list[Individual]:
+    pop: list[Individual] = []
+    for path in sorted(glob.glob(os.path.join(SEED_DIR, "*.dsl"))):
+        with open(path, encoding="utf-8") as f:
+            strat = genome.from_source(f.read())
+        src = genome.to_source(strat)
+        if src:
+            pop.append(Individual(strat, src))
+    while len(pop) < pop_size:
+        strat, src = genome.spawn_valid(lambda: genome.random_strategy(rng), rng)
+        if strat is not None:
+            pop.append(Individual(strat, src))
+    return pop[:pop_size]
+
+
+def next_generation(pop: list[Individual], rng: random.Random, elite: int = 2,
+                    p_crossover: float = 0.4) -> list[Individual]:
+    ranked = sorted(pop, key=lambda i: i.fitness, reverse=True)
+    out = [Individual(ranked[i].strat, ranked[i].src) for i in range(elite)]
+    for i in range(elite):                     # elites keep their evaluation
+        out[i].fitness = ranked[i].fitness
+        out[i].stats = ranked[i].stats
+
+    def tournament() -> Individual:
+        return max(rng.sample(pop, k=min(3, len(pop))), key=lambda i: i.fitness)
+
+    while len(out) < len(pop):
+        if rng.random() < p_crossover and len(pop) >= 2:
+            child = genome.crossover(tournament().strat, tournament().strat, rng)
+        else:
+            child = genome.mutate(tournament().strat, rng)
+        strat, src = genome.spawn_valid(lambda c=child: genome.mutate(c, rng)
+                                        if rng.random() < 0.3 else c, rng)
+        if strat is None:
+            strat, src = genome.spawn_valid(lambda: genome.random_strategy(rng), rng)
+        if strat is not None:
+            out.append(Individual(strat, src))
+    return out
+
+
+class EvolutionRun:
+    """Owns one run; the Lab polls .status while a thread executes run()."""
+
+    def __init__(self, bars, pop_size=32, generations=15, n_param_samples=48,
+                 n_folds=3, seed=0, prefer_gpu=True, inject=None, label=""):
+        self.bars = bars
+        self.pop_size = pop_size
+        self.generations = generations
+        self.n_param_samples = n_param_samples
+        self.n_folds = n_folds
+        self.rng = random.Random(seed)
+        self.prefer_gpu = prefer_gpu
+        self.inject = inject           # callable(run, gen) -> list[Individual]
+        self.stop_requested = False
+        self.gen = 0
+        self.population: list[Individual] = []
+        self.history: list[dict] = []
+        self.state = "idle"
+        self.error: str | None = None
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        self.run_dir = os.path.join(RUNS_DIR, f"run_{ts}{('_' + label) if label else ''}")
+
+    # ---- status for the Lab ----
+    def status(self) -> dict:
+        best = self.best()
+        return {
+            "state": self.state,
+            "generation": self.gen,
+            "generations": self.generations,
+            "pop_size": self.pop_size,
+            "history": self.history,
+            "best": best.to_json() if best else None,
+            "error": self.error,
+            "run_dir": os.path.basename(self.run_dir),
+        }
+
+    def best(self) -> Individual | None:
+        evald = [i for i in self.population if i.fitness is not None]
+        return max(evald, key=lambda i: i.fitness) if evald else None
+
+    def population_json(self) -> list[dict]:
+        ranked = sorted((i for i in self.population if i.fitness is not None),
+                        key=lambda i: i.fitness, reverse=True)
+        return [i.to_json() for i in ranked]
+
+    # ---- main loop ----
+    def run(self) -> None:
+        try:
+            self.state = "running"
+            os.makedirs(self.run_dir, exist_ok=True)
+            self.population = seed_population(self.rng, self.pop_size)
+            for g in range(self.generations):
+                if self.stop_requested:
+                    break
+                self.gen = g + 1
+                for k, ind in enumerate(self.population):
+                    if ind.fitness is None:
+                        evaluate(ind, self.bars, self.n_param_samples,
+                                 self.n_folds, rng_seed=g * 1000 + k,
+                                 prefer_gpu=self.prefer_gpu)
+                    if self.stop_requested:
+                        break
+                best = self.best()
+                self.history.append({
+                    "gen": self.gen,
+                    "best_fitness": best.fitness if best else None,
+                    "mean_fitness": float(np.mean(
+                        [i.fitness for i in self.population if i.fitness is not None])),
+                })
+                self._save_gen()
+                if self.stop_requested or g == self.generations - 1:
+                    break
+                if self.inject is not None:
+                    for ind in (self.inject(self, g) or []):
+                        self.population.append(ind)
+                self.population = next_generation(self.population, self.rng)
+            self.state = "stopped" if self.stop_requested else "done"
+        except Exception as e:              # surfaced through /api/evolve/status
+            self.state = "error"
+            self.error = f"{type(e).__name__}: {e}"
+
+    def _save_gen(self) -> None:
+        path = os.path.join(self.run_dir, f"gen_{self.gen:03d}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.population_json(), f, indent=1)
+        best = self.best()
+        if best:
+            with open(os.path.join(self.run_dir, "best.dsl"), "w",
+                      encoding="utf-8", newline="\n") as f:
+                f.write(best.src)
+
+
+def main() -> None:
+    from data.ohlcv import load_bars
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbol", default="BTCUSDT")
+    ap.add_argument("--bars", type=int, default=200_000)
+    ap.add_argument("--pop", type=int, default=32)
+    ap.add_argument("--gens", type=int, default=15)
+    ap.add_argument("--samples", type=int, default=48)
+    ap.add_argument("--folds", type=int, default=3)
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+
+    bars = load_bars(args.symbol)
+    bars = bars.slice(len(bars.close) - args.bars, len(bars.close))
+    run = EvolutionRun(bars, pop_size=args.pop, generations=args.gens,
+                       n_param_samples=args.samples, n_folds=args.folds,
+                       seed=args.seed)
+    t0 = time.time()
+
+    import threading
+    th = threading.Thread(target=run.run)
+    th.start()
+    printed = 0
+    while th.is_alive() or printed < len(run.history):
+        if th.is_alive():
+            th.join(timeout=2.0)
+        while printed < len(run.history):
+            h = run.history[printed]
+            print(f"gen {h['gen']:3d}  best={h['best_fitness']:8.3f}  "
+                  f"mean={h['mean_fitness']:8.3f}  ({time.time() - t0:.0f}s)")
+            printed += 1
+    best = run.best()
+    if best:
+        print(f"\nbest fitness {best.fitness:.3f} "
+              f"(oos sharpe {best.stats['mean_oos_sharpe']:.2f}, "
+              f"{best.stats['median_oos_trades']:.0f} trades/fold)\n")
+        print(best.src)
+        print(f"saved -> {run.run_dir}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,29 @@
+{
+  "bars": 100000,
+  "device": "NVIDIA GeForce RTX 4070 Laptop GPU",
+  "results": {
+    "cuda_gpu": {
+      "combos": 10000,
+      "seconds": 1.5611050999723375,
+      "backtests_per_s": 6405.718615727537
+    },
+    "cpp_openmp": {
+      "combos": 10000,
+      "seconds": 41.690497999079525,
+      "backtests_per_s": 239.8628099913987,
+      "note": "extrapolated from 500"
+    },
+    "python_ref": {
+      "combos": 10000,
+      "seconds": 379952.89949991275,
+      "backtests_per_s": 0.02631905168551634,
+      "note": "extrapolated from 2"
+    },
+    "vectorbt": {
+      "combos": 10000,
+      "seconds": 517.947796001099,
+      "backtests_per_s": 19.306965059426144,
+      "note": "extrapolated from 500; different fill semantics - throughput only"
+    }
+  }
+}
