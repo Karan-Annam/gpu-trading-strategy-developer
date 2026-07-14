@@ -23,6 +23,29 @@ _BUILD_DIRS = [
 _btcpu = None
 
 
+def _validate_bars_layout(bars) -> None:
+    close = bars.close
+    if close.ndim != 1 or close.dtype != np.float32:
+        raise ValueError("close must be a one-dimensional float32 array")
+    n = len(close)
+    if n == 0:
+        raise ValueError("bar data is empty")
+    for name in ("open", "high", "low", "close", "volume"):
+        values = getattr(bars, name)
+        if values.ndim != 1 or values.dtype != np.float32 or len(values) != n:
+            raise ValueError(f"{name} must be a length-{n} float32 array")
+
+
+def _param_matrix(program: Program, values: np.ndarray) -> np.ndarray:
+    matrix = np.ascontiguousarray(values, dtype=np.float32)
+    expected = len(program.params)
+    if matrix.ndim != 2 or matrix.shape[1] != expected:
+        raise ValueError(f"param_matrix must have shape (N, {expected})")
+    if matrix.shape[0] == 0:
+        raise ValueError("param_matrix must contain at least one row")
+    return matrix
+
+
 def _load():
     global _btcpu
     if _btcpu is None:
@@ -54,8 +77,11 @@ def run(program: Program, bars, params: list[float] | None = None,
         record_locals: bool = False) -> BacktestResult:
     m = _load()
     cfg = config or BacktestConfig()
+    _validate_bars_layout(bars)
     pvals = np.asarray(params if params is not None else program.param_defaults(),
                        dtype=np.float32)
+    if pvals.ndim != 1 or len(pvals) != len(program.params):
+        raise ValueError(f"params must contain {len(program.params)} values")
     out = m.run_single(*_engine_args(program, bars), pvals,
                        cfg.fee_rate, cfg.slip, cfg.equity0, cfg.bars_per_year,
                        record_locals)
@@ -70,6 +96,7 @@ def run_batch(program: Program, bars, param_matrix: np.ndarray,
     """Returns (N, 7): final_eq, total_ret, sharpe, max_dd, n_trades, wins, exposure_bars."""
     m = _load()
     cfg = config or BacktestConfig()
-    pm = np.ascontiguousarray(param_matrix, dtype=np.float32)
+    _validate_bars_layout(bars)
+    pm = _param_matrix(program, param_matrix)
     return m.run_batch(*_engine_args(program, bars), pm,
                        cfg.fee_rate, cfg.slip, cfg.equity0, cfg.bars_per_year)

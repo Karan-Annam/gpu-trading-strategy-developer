@@ -8,3 +8,5 @@ build/
 *.lib
 .pytest_cache/
 lab/library/*.json
+lab/library/*.dsl
+evolve/runs/

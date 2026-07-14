@@ -9,12 +9,13 @@ from __future__ import annotations
 import os
 import re
 import sys
+from typing import Literal
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -51,38 +52,38 @@ def get_bars(symbol: str, interval: str):
 # ---------- models ----------
 
 class CompileReq(BaseModel):
-    source: str
+    source: str = Field(min_length=1, max_length=100_000)
 
 
 class RunReq(BaseModel):
-    source: str
-    symbol: str = "BTCUSDT"
-    interval: str = "1m"
-    last_bars: int = 43_200          # default: last 30 days of 1m bars
-    params: dict[str, float] = {}
-    engine: str = "auto"             # auto | cpu | ref
+    source: str = Field(min_length=1, max_length=100_000)
+    symbol: str = Field(default="BTCUSDT", pattern=r"^[A-Z0-9]{2,20}$")
+    interval: str = Field(default="1m", pattern=r"^[0-9]+[mhdw]$")
+    last_bars: int = Field(default=43_200, ge=1, le=5_000_000)
+    params: dict[str, float] = Field(default_factory=dict)
+    engine: Literal["auto", "cpu", "ref"] = "auto"
 
 
 class SaveReq(BaseModel):
-    name: str
-    source: str
+    name: str = Field(min_length=1, max_length=60)
+    source: str = Field(min_length=1, max_length=100_000)
 
 
 class AxisSpec(BaseModel):
     name: str
-    steps: int = 25
+    steps: int = Field(default=25, ge=2, le=200)
 
 
 class SweepReq(BaseModel):
-    source: str
-    symbol: str = "BTCUSDT"
-    interval: str = "1m"
-    last_bars: int = 129_600
+    source: str = Field(min_length=1, max_length=100_000)
+    symbol: str = Field(default="BTCUSDT", pattern=r"^[A-Z0-9]{2,20}$")
+    interval: str = Field(default="1m", pattern=r"^[0-9]+[mhdw]$")
+    last_bars: int = Field(default=129_600, ge=1, le=5_000_000)
     x: AxisSpec
     y: AxisSpec | None = None
-    fixed: dict[str, float] = {}
+    fixed: dict[str, float] = Field(default_factory=dict)
     metric: str = "sharpe"
-    n_folds: int = 0             # 0 = single period, >1 = mean OOS across folds
+    n_folds: int = Field(default=0, ge=0, le=10)
 
 
 # ---------- helpers ----------
@@ -163,6 +164,12 @@ def api_run(req: RunReq):
     ts = (view.ts // 1000).astype(np.float64)
     idx = decimate_idx(len(view.ts))
     equity = np.asarray(res.equity)
+    numeric_metrics = [float(v) for v in res.metrics.values()
+                       if isinstance(v, (int, float, np.floating))]
+    if (not bool(np.all(np.isfinite(equity))) or
+            not bool(np.all(np.isfinite(numeric_metrics)))):
+        raise HTTPException(
+            422, "strategy produced non-finite results; reduce expression or parameter ranges")
 
     out = {
         "ok": True,
@@ -191,7 +198,8 @@ def api_run(req: RunReq):
         overlays = {}
         for i, name in enumerate(prog.local_names):
             col = res.locals_curve[:, i].astype(np.float64)
-            m = float(np.median(np.abs(col[np.isfinite(col)]))) if len(col) else 0.0
+            finite = col[np.isfinite(col)]
+            m = float(np.median(np.abs(finite))) if len(finite) else 0.0
             if med > 0 and 0.2 * med <= m <= 5.0 * med:
                 overlays[name] = col[idx].tolist()
         out["chart"]["overlays"] = overlays
@@ -235,9 +243,9 @@ def api_sweep(req: SweepReq):
 
     col = sweeplib.COL[req.metric]
     if req.n_folds > 1:
-        _, test = sweeplib.fold_metrics(prog, view, pm, req.n_folds)
-        vals = test[:, :, col].mean(axis=0)
-        sharpes = test[:, :, sweeplib.COL["sharpe"]].mean(axis=0)
+        validation = sweeplib.validation_metrics(prog, view, pm, req.n_folds)
+        vals = validation[:, :, col].mean(axis=0)
+        sharpes = validation[:, :, sweeplib.COL["sharpe"]].mean(axis=0)
     else:
         eng = sweeplib.pick_engine()
         m = eng.run_batch(prog, view, pm)
@@ -245,8 +253,15 @@ def api_sweep(req: SweepReq):
         sharpes = m[:, sweeplib.COL["sharpe"]]
 
     matrix = vals.reshape(nx, ny)
+    if not bool(np.all(np.isfinite(vals))):
+        raise HTTPException(
+            422, "strategy produced non-finite sweep metrics; reduce expression or parameter ranges")
     best_flat = int(np.nanargmax(vals))
-    dsr = sweeplib.deflated_sharpe(float(sharpes[best_flat]), sharpes, n)
+    # The implemented DSR approximation expects one return series. Averaged,
+    # overlapping fold Sharpes do not meet that assumption, so do not present a
+    # misleading probability for fold-validation mode.
+    dsr = (float("nan") if req.n_folds > 1 else
+           sweeplib.deflated_sharpe(float(sharpes[best_flat]), sharpes, n))
 
     return {
         "ok": True,
@@ -268,17 +283,17 @@ def api_sweep(req: SweepReq):
 # ---------- evolution ----------
 
 class EvolveStartReq(BaseModel):
-    symbol: str = "BTCUSDT"
-    interval: str = "1m"
-    last_bars: int = 129_600
-    pop_size: int = 24
-    generations: int = 10
-    n_param_samples: int = 48
-    n_folds: int = 3
+    symbol: str = Field(default="BTCUSDT", pattern=r"^[A-Z0-9]{2,20}$")
+    interval: str = Field(default="1m", pattern=r"^[0-9]+[mhdw]$")
+    last_bars: int = Field(default=129_600, ge=125, le=5_000_000)
+    pop_size: int = Field(default=24, ge=2, le=256)
+    generations: int = Field(default=10, ge=1, le=100)
+    n_param_samples: int = Field(default=48, ge=1, le=2_048)
+    n_folds: int = Field(default=3, ge=1, le=10)
     seed: int = 0
     llm_inject: bool = False        # Claude proposes novel variants every few gens
-    llm_hint: str = ""              # optional human guidance passed to Claude
-    llm_max_calls: int = 8          # budget guard
+    llm_hint: str = Field(default="", max_length=2_000)
+    llm_max_calls: int = Field(default=8, ge=0, le=100)
 
 
 _evo_lock = threading.Lock()
@@ -352,12 +367,12 @@ def evolve_stop():
 # ---------- Claude (idea box + conversational improvement) ----------
 
 class IdeaReq(BaseModel):
-    idea: str
+    idea: str = Field(min_length=1, max_length=10_000)
 
 
 class ImproveReq(BaseModel):
-    source: str
-    instruction: str
+    source: str = Field(min_length=1, max_length=100_000)
+    instruction: str = Field(min_length=1, max_length=10_000)
     metrics: dict | None = None
 
 
@@ -407,6 +422,8 @@ def strategies():
 
 @app.get("/api/strategy/{group}/{name}")
 def strategy_get(group: str, name: str):
+    if group not in ("seed", "library"):
+        raise HTTPException(404, "unknown strategy group")
     folder = SEEDS if group == "seed" else LIBRARY
     path = os.path.join(folder, _safe(name) + ".dsl")
     if not os.path.exists(path):

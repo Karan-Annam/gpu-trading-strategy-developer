@@ -40,14 +40,27 @@ class Bars:
 
     def validate(self) -> None:
         n = len(self.ts)
+        if self.ts.ndim != 1 or self.ts.dtype != np.int64:
+            raise ValueError("timestamps must be a one-dimensional int64 array")
+        if n == 0:
+            raise ValueError("bar data is empty")
         for c in COLUMNS:
             a = getattr(self, c)
-            assert a.dtype == np.float32 and len(a) == n, c
-        assert self.ts.dtype == np.int64
+            if a.ndim != 1 or a.dtype != np.float32 or len(a) != n:
+                raise ValueError(f"{c} must be a length-{n} float32 array")
+            if not bool(np.all(np.isfinite(a))):
+                raise ValueError(f"{c} contains non-finite values")
         if n > 1:
-            assert bool(np.all(np.diff(self.ts) > 0)), "timestamps not strictly increasing"
-        assert bool(np.all(self.high >= self.low)), "high < low"
-        assert bool(np.all(self.volume >= 0)), "negative volume"
+            if not bool(np.all(np.diff(self.ts) > 0)):
+                raise ValueError("timestamps are not strictly increasing")
+        if not bool(np.all(self.low > 0)):
+            raise ValueError("prices must be positive")
+        if not bool(np.all(self.high >= np.maximum(self.open, self.close))):
+            raise ValueError("high is below open or close")
+        if not bool(np.all(self.low <= np.minimum(self.open, self.close))):
+            raise ValueError("low is above open or close")
+        if not bool(np.all(self.volume >= 0)):
+            raise ValueError("volume is negative")
 
 
 def cache_path(symbol: str, interval: str) -> str:

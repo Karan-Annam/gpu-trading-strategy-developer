@@ -61,14 +61,18 @@ def test_strip_and_reparameterize_seed():
 
 
 @pytest.mark.skipif(not cpu_engine.available(), reason="btcpu not built")
-def test_miniature_evolution_run():
+def test_miniature_evolution_run(tmp_path):
     bars = random_walk_bars(2500, seed=3, drift=0.0001)
     run = EvolutionRun(bars, pop_size=6, generations=2, n_param_samples=8,
-                       n_folds=2, seed=4, prefer_gpu=False)
+                       n_folds=2, seed=4, prefer_gpu=False,
+                       run_root=str(tmp_path))
     run.run()
     assert run.state == "done", run.error
     assert run.best() is not None
     assert run.best().fitness is not None
     assert len(run.history) == 2
+    assert run.status()["search_bars"] == 2000
+    assert run.status()["holdout_bars"] == 500
+    assert "holdout" in run.best().stats
     pop = run.population_json()
     assert all("src" in p and p["fitness"] is not None for p in pop)

@@ -282,7 +282,7 @@ async function doSweep() {
     const dt = ((performance.now() - t0) / 1000).toFixed(1);
     $("sweepInfo").textContent =
       `${res.combos.toLocaleString()} combos on ${res.engine} in ${dt}s` +
-      (res.folds > 1 ? ` - mean OOS over ${res.folds} folds` : "");
+      (res.folds > 1 ? ` - mean validation over ${res.folds} folds` : "");
     renderSweep(res);
   } finally {
     btn.disabled = false;
@@ -578,7 +578,7 @@ function renderPopulation(pop) {
     const oneLine = ind.src.replace(/\s*\n\s*/g, "  ").trim();
     row.innerHTML =
       `<span class="fit ${cls}">${fit.toFixed(3)}</span>` +
-      `<span class="meta">${(ind.median_oos_trades || 0).toFixed(0)} trades, ` +
+      `<span class="meta">${(ind.median_validation_trades || 0).toFixed(0)} trades, ` +
       `${ind.n_ops || 0} ops</span>` +
       `<span class="src"></span>`;
     row.querySelector(".src").textContent = oneLine;

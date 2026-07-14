@@ -48,10 +48,10 @@ def evaluate(ind: Individual, bars, n_param_samples: int, n_folds: int,
     if prog.params:
         defaults = np.asarray([prog.param_defaults()], dtype=np.float32)
         pm = np.vstack([defaults, pm])
-    _, test = sweep.fold_metrics(prog, bars, pm, n_folds=n_folds,
-                                 prefer_gpu=prefer_gpu)
-    scores = sweep.robust_score(test)                       # (N,)
-    med_trades = float(np.median(test[:, :, sweep.COL["n_trades"]]))
+    validation = sweep.validation_metrics(
+        prog, bars, pm, n_folds=n_folds, prefer_gpu=prefer_gpu)
+    scores = sweep.robust_score(validation)                 # (N,)
+    med_trades = float(np.median(validation[:, :, sweep.COL["n_trades"]]))
     q75 = float(np.quantile(scores, 0.75))
     fitness = q75 - COMPLEXITY_PENALTY * len(prog.code)
     if med_trades < MIN_TRADES_PER_FOLD:
@@ -59,13 +59,25 @@ def evaluate(ind: Individual, bars, n_param_samples: int, n_folds: int,
     best_row = int(np.argmax(scores))
     ind.fitness = float(fitness)
     ind.stats = {
-        "q75_score": q75,
-        "best_row_score": float(scores[best_row]),
+        "validation_q75_score": q75,
+        "best_validation_row_score": float(scores[best_row]),
         "best_params": {p["name"]: float(pm[best_row, j])
                         for j, p in enumerate(prog.params)},
-        "median_oos_trades": med_trades,
-        "mean_oos_sharpe": float(test[:, :, sweep.COL["sharpe"]].mean()),
+        "median_validation_trades": med_trades,
+        "mean_validation_sharpe": float(
+            validation[:, :, sweep.COL["sharpe"]].mean()),
         "n_ops": len(prog.code),
+    }
+
+
+def evaluate_holdout(ind: Individual, bars, prefer_gpu: bool = True) -> None:
+    """Evaluate the selected program/parameters once on untouched final bars."""
+    prog = compile_source(ind.src)
+    params = np.asarray([[ind.stats["best_params"][p["name"]]
+                          for p in prog.params]], dtype=np.float32)
+    metrics = sweep.pick_engine(prefer_gpu).run_batch(prog, bars, params)[0]
+    ind.stats["holdout"] = {
+        name: float(metrics[column]) for name, column in sweep.COL.items()
     }
 
 
@@ -113,8 +125,15 @@ class EvolutionRun:
     """Owns one run; the Lab polls .status while a thread executes run()."""
 
     def __init__(self, bars, pop_size=32, generations=15, n_param_samples=48,
-                 n_folds=3, seed=0, prefer_gpu=True, inject=None, label=""):
-        self.bars = bars
+                 n_folds=3, seed=0, prefer_gpu=True, inject=None, label="",
+                 holdout_frac=0.2, run_root=RUNS_DIR):
+        if not 0.0 < holdout_frac < 0.5:
+            raise ValueError("holdout_frac must be between 0 and 0.5")
+        split = int(len(bars) * (1.0 - holdout_frac))
+        if split < 100 or len(bars) - split < 20:
+            raise ValueError("not enough bars for search and final holdout")
+        self.bars = bars.slice(0, split)
+        self.holdout_bars = bars.slice(split, len(bars))
         self.pop_size = pop_size
         self.generations = generations
         self.n_param_samples = n_param_samples
@@ -129,7 +148,8 @@ class EvolutionRun:
         self.state = "idle"
         self.error: str | None = None
         ts = time.strftime("%Y%m%d_%H%M%S")
-        self.run_dir = os.path.join(RUNS_DIR, f"run_{ts}{('_' + label) if label else ''}")
+        self.run_dir = os.path.join(
+            run_root, f"run_{ts}{('_' + label) if label else ''}")
 
     # ---- status for the Lab ----
     def status(self) -> dict:
@@ -143,6 +163,8 @@ class EvolutionRun:
             "best": best.to_json() if best else None,
             "error": self.error,
             "run_dir": os.path.basename(self.run_dir),
+            "search_bars": len(self.bars),
+            "holdout_bars": len(self.holdout_bars),
         }
 
     def best(self) -> Individual | None:
@@ -185,6 +207,10 @@ class EvolutionRun:
                     for ind in (self.inject(self, g) or []):
                         self.population.append(ind)
                 self.population = next_generation(self.population, self.rng)
+            best = self.best()
+            if best is not None and not self.stop_requested:
+                evaluate_holdout(best, self.holdout_bars, self.prefer_gpu)
+                self._save_gen()  # overwrite the final snapshot with holdout metrics
             self.state = "stopped" if self.stop_requested else "done"
         except Exception as e:              # surfaced through /api/evolve/status
             self.state = "error"
@@ -234,9 +260,10 @@ def main() -> None:
             printed += 1
     best = run.best()
     if best:
+        holdout = best.stats.get("holdout", {})
         print(f"\nbest fitness {best.fitness:.3f} "
-              f"(oos sharpe {best.stats['mean_oos_sharpe']:.2f}, "
-              f"{best.stats['median_oos_trades']:.0f} trades/fold)\n")
+              f"(validation sharpe {best.stats['mean_validation_sharpe']:.2f}, "
+              f"holdout sharpe {holdout.get('sharpe', float('nan')):.2f})\n")
         print(best.src)
         print(f"saved -> {run.run_dir}")
 

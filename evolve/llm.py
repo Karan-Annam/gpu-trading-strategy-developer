@@ -162,8 +162,8 @@ def inject_novelty(top: list[dict], hint: str | None = None, n: int = 2) -> list
     Returns compilable sources only (failed generations are dropped)."""
     summary = "\n\n".join(
         f"### Strategy {i + 1} (fitness {t.get('fitness', 0):.3f}, "
-        f"oos sharpe {t.get('mean_oos_sharpe', 0):.2f}, "
-        f"{t.get('median_oos_trades', 0):.0f} trades/fold)\n```dsl\n{t['src']}```"
+        f"validation sharpe {t.get('mean_validation_sharpe', 0):.2f}, "
+        f"{t.get('median_validation_trades', 0):.0f} trades/fold)\n```dsl\n{t['src']}```"
         for i, t in enumerate(top))
     hint_txt = f"\nGuidance from the user: {hint}\n" if hint else ""
     out = []
@@ -172,7 +172,7 @@ def inject_novelty(top: list[dict], hint: str | None = None, n: int = 2) -> list
             "role": "user",
             "content": (
                 f"These are the current best strategies in an evolutionary "
-                f"search (fitness = out-of-sample robustness across "
+                f"search (fitness = validation robustness across "
                 f"walk-forward folds, penalized for complexity):\n\n{summary}\n"
                 f"{hint_txt}\n"
                 f"Propose ONE new strategy (variant #{k + 1}) that is "

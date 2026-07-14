@@ -84,6 +84,21 @@ def fold_metrics(program: Program, bars, pm: np.ndarray, n_folds: int = 4,
     return np.stack(tr), np.stack(te)
 
 
+def validation_metrics(program: Program, bars, pm: np.ndarray, n_folds: int = 4,
+                       train_frac: float = 0.7, config=None,
+                       prefer_gpu: bool = True) -> np.ndarray:
+    """Metrics for fold validation slices only: (n_folds, N, 7).
+
+    Use this when the training slices are not used for per-fold selection. It
+    avoids running and discarding half of the backtests from ``fold_metrics``.
+    """
+    eng = pick_engine(prefer_gpu)
+    return np.stack([
+        eng.run_batch(program, bars.slice(b0, b1), pm, config)
+        for _, (b0, b1) in folds(len(bars.close), n_folds, train_frac)
+    ])
+
+
 def robust_score(test_metrics: np.ndarray, metric: str = "sharpe") -> np.ndarray:
     """Mean minus half a std of the OOS metric across folds. (N,)"""
     m = test_metrics[:, :, COL[metric]]

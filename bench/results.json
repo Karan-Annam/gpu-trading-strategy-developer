@@ -1,28 +1,50 @@
 {
   "bars": 100000,
+  "combos": 10000,
   "device": "NVIDIA GeForce RTX 4070 Laptop GPU",
+  "host": {
+    "system": "Windows",
+    "processor": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel"
+  },
+  "versions": {
+    "python": "3.13.14",
+    "numpy": "2.4.6"
+  },
   "results": {
     "cuda_gpu": {
       "combos": 10000,
-      "seconds": 1.5611050999723375,
-      "backtests_per_s": 6405.718615727537
+      "seconds": 1.559043399989605,
+      "backtests_per_s": 6414.189624270034,
+      "trial_seconds": [
+        1.5854378999210894,
+        1.5586072001606226,
+        1.559043399989605
+      ],
+      "statistic": "median"
     },
     "cpp_openmp": {
       "combos": 10000,
-      "seconds": 41.690497999079525,
-      "backtests_per_s": 239.8628099913987,
-      "note": "extrapolated from 500"
+      "seconds": 68.5537132001482,
+      "backtests_per_s": 145.87101898921478,
+      "measured_combos": 10000,
+      "trial_seconds": [
+        68.5537132001482,
+        66.78249619994313,
+        69.68255309993401
+      ],
+      "statistic": "median"
     },
+    "cuda_cpu_crosscheck_rows": 10000,
     "python_ref": {
       "combos": 10000,
-      "seconds": 379952.89949991275,
-      "backtests_per_s": 0.02631905168551634,
+      "seconds": 492115.13550020754,
+      "backtests_per_s": 0.02032044795743898,
       "note": "extrapolated from 2"
     },
     "vectorbt": {
       "combos": 10000,
-      "seconds": 517.947796001099,
-      "backtests_per_s": 19.306965059426144,
+      "seconds": 578.5768279992044,
+      "backtests_per_s": 17.28378931901115,
       "note": "extrapolated from 500; different fill semantics - throughput only"
     }
   }

@@ -38,7 +38,9 @@ set stop_loss = 0.02                      # risk config, may reference params
   (`> < >= <= == !=`, non-chaining), `+ -`, `* /`, unary `-`, call/index.
 - Booleans are floats: comparisons yield 1.0/0.0, truthy means ≠ 0. `and`/`or`
   evaluate both sides (no short-circuit — keeps state updates unconditional).
-- **Safe math**: `x / 0 → 0`, `sqrt(x<0) → 0`, `log(x≤0) → 0`. No NaNs, ever.
+- **Guarded domains**: `x / 0 → 0`, `sqrt(x<0) → 0`, and `log(x≤0) → 0`.
+  Other arithmetic follows float32 behavior; validated market data is finite,
+  but a strategy can still overflow with extreme expressions or parameters.
 
 ### Builtins
 

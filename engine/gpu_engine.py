@@ -14,6 +14,7 @@ import numpy as np
 
 from dsl.compiler import Program
 from dsl.refengine import BacktestConfig
+from engine.cpu_engine import _param_matrix, _validate_bars_layout
 
 _BUILD_DIRS = [
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "build", "engine", "Release"),
@@ -54,9 +55,8 @@ def run_batch(program: Program, bars, param_matrix: np.ndarray,
     m = _load()
     cfg = config or BacktestConfig()
     a = program.arrays()
-    pm = np.ascontiguousarray(param_matrix, dtype=np.float32)
-    if pm.ndim != 2:
-        raise ValueError("param_matrix must be (N, n_params)")
+    _validate_bars_layout(bars)
+    pm = _param_matrix(program, param_matrix)
     N = pm.shape[0]
 
     # sort rows so warps see similar window sizes (divergence), then unsort;

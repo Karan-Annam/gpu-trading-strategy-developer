@@ -107,7 +107,26 @@ py::array_t<double> run_batch(u32arr code, farr consts, i32arr kind, i32arr off,
         throw std::runtime_error("param_matrix must be 2-D (N, n_params)");
     const int N = (int)param_matrix.shape(0);
     const int P = (int)param_matrix.shape(1);
+    if (N <= 0) throw std::runtime_error("param_matrix must not be empty");
     if (P > 16) throw std::runtime_error("max 16 params");
+    if (code.ndim() != 1 || consts.ndim() != 1 || kind.ndim() != 1 ||
+        off.ndim() != 1 || cap.ndim() != 1 || aux.ndim() != 1)
+        throw std::runtime_error("program arrays must be one-dimensional");
+    if (code.size() == 0)
+        throw std::runtime_error("program bytecode is empty");
+    if (kind.size() != off.size() || cap.size() != off.size() ||
+        aux.size() != off.size())
+        throw std::runtime_error("program state arrays must have equal lengths");
+    if (n_locals < 0 || state_floats < 0)
+        throw std::runtime_error("invalid program resource counts");
+    if (o.ndim() != 1 || h.ndim() != 1 || l.ndim() != 1 || c.ndim() != 1 ||
+        v.ndim() != 1)
+        throw std::runtime_error("OHLCV arrays must be one-dimensional");
+    if (c.size() == 0)
+        throw std::runtime_error("bar data is empty");
+    if (o.size() != c.size() || h.size() != c.size() || l.size() != c.size() ||
+        v.size() != c.size())
+        throw std::runtime_error("OHLCV arrays must have equal lengths");
     const int n_code = (int)code.size();
     if (n_code > kMaxSharedCode) throw std::runtime_error("program too large");
     const int T = (int)c.size();

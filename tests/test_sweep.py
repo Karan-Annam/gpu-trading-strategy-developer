@@ -48,6 +48,9 @@ def test_fold_metrics_and_wfa():
     assert test.shape == (3, len(pm), 7)
     score = sweep.robust_score(test)
     assert score.shape == (len(pm),)
+    validation = sweep.validation_metrics(
+        prog, bars, pm, n_folds=3, prefer_gpu=False)
+    np.testing.assert_allclose(validation, test)
     wfa = sweep.walk_forward_select(prog, bars, pm, n_folds=3, prefer_gpu=False)
     assert wfa["picks"].shape == (3, 2)
     assert wfa["oos_metrics"].shape == (3, 7)

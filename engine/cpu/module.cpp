@@ -31,6 +31,16 @@ struct CpuSink {
 ProgramView make_prog(const u32arr& code, const farr& consts, const i32arr& kind,
                       const i32arr& off, const i32arr& cap, const i32arr& aux,
                       int n_locals, int state_floats, int n_params) {
+    if (code.ndim() != 1 || consts.ndim() != 1 || kind.ndim() != 1 ||
+        off.ndim() != 1 || cap.ndim() != 1 || aux.ndim() != 1)
+        throw std::runtime_error("program arrays must be one-dimensional");
+    if (code.size() == 0)
+        throw std::runtime_error("program bytecode is empty");
+    if (kind.size() != off.size() || cap.size() != off.size() ||
+        aux.size() != off.size())
+        throw std::runtime_error("program state arrays must have equal lengths");
+    if (n_locals < 0 || state_floats < 0 || n_params < 0 || n_params > 16)
+        throw std::runtime_error("invalid program resource counts");
     ProgramView p;
     p.code = code.data();
     p.n_code = (int)code.size();
@@ -48,6 +58,14 @@ ProgramView make_prog(const u32arr& code, const farr& consts, const i32arr& kind
 
 BarsView make_bars(const farr& o, const farr& h, const farr& l, const farr& c,
                    const farr& v) {
+    if (o.ndim() != 1 || h.ndim() != 1 || l.ndim() != 1 || c.ndim() != 1 ||
+        v.ndim() != 1)
+        throw std::runtime_error("OHLCV arrays must be one-dimensional");
+    if (c.size() == 0)
+        throw std::runtime_error("bar data is empty");
+    if (o.size() != c.size() || h.size() != c.size() || l.size() != c.size() ||
+        v.size() != c.size())
+        throw std::runtime_error("OHLCV arrays must have equal lengths");
     BarsView b{o.data(), h.data(), l.data(), c.data(), v.data(), (int)c.size()};
     return b;
 }
@@ -68,6 +86,8 @@ py::dict run_single(u32arr code, farr consts, i32arr kind, i32arr off, i32arr ca
                     i32arr aux, int n_locals, int state_floats, farr o, farr h,
                     farr l, farr c, farr v, farr params, double fee, double slip,
                     double equity0, double bars_per_year, bool want_locals) {
+    if (params.ndim() != 1)
+        throw std::runtime_error("params must be one-dimensional");
     ProgramView prog = make_prog(code, consts, kind, off, cap, aux, n_locals,
                                  state_floats, (int)params.size());
     BarsView bars = make_bars(o, h, l, c, v);

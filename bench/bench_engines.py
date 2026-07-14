@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
 import time
 
@@ -49,7 +50,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bars", type=int, default=100_000)
     ap.add_argument("--combos", type=int, default=10_000)
+    ap.add_argument("--cpu-combos", type=int, default=0,
+                    help="rows to measure on CPU; 0 measures the full sweep")
+    ap.add_argument("--trials", type=int, default=3,
+                    help="CUDA and OpenMP trials; medians are reported")
     args = ap.parse_args()
+    if args.bars < 1 or args.combos < 1 or args.trials < 1:
+        ap.error("bars, combos, and trials must be positive")
 
     bars = load_bars("BTCUSDT").slice(-args.bars, None)
     prog = compile_source(SRC)
@@ -58,20 +65,37 @@ def main():
 
     # GPU (includes H2D/D2H transfers); warm up CUDA context first
     gpu_engine.run_batch(prog, bars.slice(0, 2000), pm[:256])
-    t0 = time.perf_counter()
-    gpu_engine.run_batch(prog, bars, pm)
-    dt = time.perf_counter() - t0
+    gpu_times = []
+    gpu_result = None
+    for _ in range(args.trials):
+        t0 = time.perf_counter()
+        gpu_result = gpu_engine.run_batch(prog, bars, pm)
+        gpu_times.append(time.perf_counter() - t0)
+    dt = float(np.median(gpu_times))
     results["cuda_gpu"] = {"combos": args.combos, "seconds": dt,
-                           "backtests_per_s": args.combos / dt}
+                           "backtests_per_s": args.combos / dt,
+                           "trial_seconds": gpu_times,
+                           "statistic": "median"}
 
-    # CPU C++ OpenMP (sample 500, extrapolate)
-    n = min(500, args.combos)
-    t0 = time.perf_counter()
-    cpu_engine.run_batch(prog, bars, pm[:n])
-    dt = (time.perf_counter() - t0) * args.combos / n
+    # CPU C++ OpenMP. The default measures the complete sweep.
+    n = args.combos if args.cpu_combos <= 0 else min(args.cpu_combos, args.combos)
+    cpu_times = []
+    cpu_result = None
+    for _ in range(args.trials):
+        t0 = time.perf_counter()
+        cpu_result = cpu_engine.run_batch(prog, bars, pm[:n])
+        cpu_times.append(time.perf_counter() - t0)
+    measured_dt = float(np.median(cpu_times))
+    dt = measured_dt * args.combos / n
     results["cpp_openmp"] = {"combos": args.combos, "seconds": dt,
                              "backtests_per_s": args.combos / dt,
-                             "note": f"extrapolated from {n}"}
+                             "measured_combos": n,
+                             "trial_seconds": cpu_times,
+                             "statistic": "median"}
+    if n != args.combos:
+        results["cpp_openmp"]["note"] = f"extrapolated from {n}"
+    np.testing.assert_allclose(cpu_result, gpu_result[:n], rtol=1e-4, atol=1e-5)
+    results["cuda_cpu_crosscheck_rows"] = n
 
     # Python reference (sample 2, extrapolate)
     t0 = time.perf_counter()
@@ -113,8 +137,14 @@ def main():
     except Exception as e:  # vectorbt API drift shouldn't kill the bench
         results["vectorbt"] = {"note": f"failed: {e}"}
 
-    out = {"bars": args.bars, "device": gpu_engine.device_info()["name"]
-           if gpu_engine.available() else None, "results": results}
+    out = {
+        "bars": args.bars,
+        "combos": args.combos,
+        "device": gpu_engine.device_info()["name"] if gpu_engine.available() else None,
+        "host": {"system": platform.system(), "processor": platform.processor()},
+        "versions": {"python": platform.python_version(), "numpy": np.__version__},
+        "results": results,
+    }
     print(json.dumps(out, indent=2))
     path = os.path.join(os.path.dirname(__file__), "results.json")
     with open(path, "w", encoding="utf-8") as f:

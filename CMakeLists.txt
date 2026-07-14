@@ -35,8 +35,11 @@ if(CMAKE_CUDA_COMPILER)
         set(CMAKE_CUDA_ARCHITECTURES 89)   # RTX 4070 (Ada)
     endif()
     add_executable(cuda_smoke engine/cuda/smoke.cu)
+    set_property(TARGET cuda_smoke PROPERTY CUDA_RUNTIME_LIBRARY Shared)
 
     pybind11_add_module(btcuda engine/cuda/cuda_module.cu)
+    # Match Python/MSVC's dynamic CRT and avoid a static-cudart LIBCMT conflict.
+    set_property(TARGET btcuda PROPERTY CUDA_RUNTIME_LIBRARY Shared)
     if(NOT BT_CUDA_FMAD)
         # keep float op-for-op identical to the CPU engines (SPEC.md section 5)
         target_compile_options(btcuda PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>)
