@@ -39,9 +39,9 @@ def _load():
 
 def available() -> bool:
     try:
-        _load()
+        _load().device_info()
         return True
-    except ImportError:
+    except Exception:
         return False
 
 
@@ -71,7 +71,11 @@ def run_batch(program: Program, bars, param_matrix: np.ndarray,
         pm_sorted = pm
 
     per_thread = max(program.state_floats, 1) * 4
-    chunk = max(min(N, STATE_BUDGET_BYTES // per_thread), 1024)
+    free_bytes = int(float(m.device_info()["mem_free_mb"]) * 1048576)
+    # Leave room for the context, bar/program buffers, outputs and unrelated
+    # processes. Never force a minimum chunk that exceeds the state budget.
+    budget = min(STATE_BUDGET_BYTES, max(free_bytes * 7 // 10, per_thread))
+    chunk = max(1, min(N, budget // per_thread))
 
     outs = []
     for s in range(0, N, chunk):
@@ -86,4 +90,6 @@ def run_batch(program: Program, bars, param_matrix: np.ndarray,
         inv = np.empty_like(order)
         inv[order] = np.arange(N)
         out = out[inv]
+    if not bool(np.all(np.isfinite(out))):
+        raise FloatingPointError("GPU engine produced non-finite metrics")
     return out

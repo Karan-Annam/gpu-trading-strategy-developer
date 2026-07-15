@@ -82,6 +82,17 @@ def test_error_carries_location():
     assert ei.value.col > 0
 
 
+def test_parameter_step_must_be_positive():
+    with pytest.raises(CompileError, match="step must be positive"):
+        compile_source("param n = 1 in [1, 5] step 0\nbuy when close > open\n")
+
+
+def test_float32_overflow_is_rejected():
+    huge = "9" * 100
+    with pytest.raises(CompileError, match="finite float32"):
+        compile_source(f"buy when close > {huge}\n")
+
+
 def test_window_bound_via_params():
     # bound = hi(a) * hi(b) = 20 * 4 = 80
     prog = compile_source(

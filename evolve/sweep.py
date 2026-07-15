@@ -27,10 +27,17 @@ def pick_engine(prefer_gpu: bool = True):
 def axis_values(spec: dict, steps: int | None = None) -> np.ndarray:
     """Values along one param axis, honouring a declared step."""
     lo, hi, step = spec["lo"], spec["hi"], spec.get("step")
-    if step:
+    if not np.isfinite([lo, hi]).all() or hi < lo:
+        raise ValueError("parameter axis requires finite lo <= hi")
+    if step is not None:
+        if not np.isfinite(step) or step <= 0:
+            raise ValueError("parameter step must be finite and positive")
         vals = np.arange(lo, hi + step * 0.5, step, dtype=np.float64)
     else:
-        vals = np.linspace(lo, hi, steps or 25)
+        count = steps or 25
+        if count < 2:
+            raise ValueError("parameter axis requires at least two steps")
+        vals = np.linspace(lo, hi, count)
     return vals.astype(np.float32)
 
 
@@ -46,6 +53,8 @@ def build_grid(program: Program, steps_per_axis: int = 10) -> np.ndarray:
 def lhs_sample(program: Program, n: int, seed: int = 0) -> np.ndarray:
     """Latin hypercube over the param box."""
     P = len(program.params)
+    if n < 1:
+        raise ValueError("sample count must be positive")
     if P == 0:
         return np.zeros((1, 0), dtype=np.float32)
     rng = np.random.default_rng(seed)
@@ -62,12 +71,18 @@ def folds(T: int, n_folds: int = 4, train_frac: float = 0.7):
     """Rolling contiguous (train, test) index-pair windows covering [0, T)."""
     if n_folds < 1:
         raise ValueError("n_folds >= 1")
+    if not 0.0 < train_frac < 1.0:
+        raise ValueError("train_frac must be between zero and one")
     seg = T // (n_folds + 1)          # anchored-ish rolling windows
+    if seg < 2:
+        raise ValueError("not enough bars for the requested folds")
     out = []
     for i in range(n_folds):
         start = i * seg
         end = start + 2 * seg if i < n_folds - 1 else T
         split = start + int((end - start) * train_frac)
+        if split <= start or split >= end:
+            raise ValueError("fold contains an empty train or validation slice")
         out.append(((start, split), (split, end)))
     return out
 

@@ -8,6 +8,7 @@ CUDA engines perform it. All engine work is validated against this.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 import numpy as np
 
@@ -27,6 +28,19 @@ class BacktestConfig:
     slip: float = 0.0005
     bars_per_year: float = 525600.0
     equity0: float = 10000.0
+
+    def __post_init__(self) -> None:
+        values = (self.fee_rate, self.slip, self.bars_per_year, self.equity0)
+        if not all(math.isfinite(v) for v in values):
+            raise ValueError("backtest configuration values must be finite")
+        if self.fee_rate < 0:
+            raise ValueError("fee_rate must be non-negative")
+        if not 0 <= self.slip < 1:
+            raise ValueError("slip must be in [0, 1)")
+        if self.bars_per_year <= 0:
+            raise ValueError("bars_per_year must be positive")
+        if self.equity0 <= 0:
+            raise ValueError("equity0 must be positive")
 
 
 @dataclass
@@ -57,9 +71,21 @@ def run(program: Program, bars, params: list[float] | None = None,
         config: BacktestConfig | None = None,
         record_locals: bool = False) -> BacktestResult:
     cfg = config or BacktestConfig()
+    if hasattr(bars, "validate"):
+        bars.validate()
+    if hasattr(bars, "missing_intervals"):
+        missing = bars.missing_intervals()
+        if missing:
+            raise ValueError(
+                f"bar data has {missing} missing intervals; fill or reindex gaps before backtesting")
     pvals = [F(v) for v in (params if params is not None else program.param_defaults())]
     if len(pvals) != len(program.params):
         raise ValueError("wrong number of params")
+    for value, spec in zip(pvals, program.params):
+        if not np.isfinite(value):
+            raise ValueError(f"parameter {spec['name']} must be finite")
+        if not spec["lo"] <= float(value) <= spec["hi"]:
+            raise ValueError(f"parameter {spec['name']} is outside its declared range")
 
     op_arr = np.asarray(program.code, dtype=np.uint64)
     ops = [(int(c) >> 24, int(c) & 0xFFFFFF) for c in op_arr]

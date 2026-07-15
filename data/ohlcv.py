@@ -8,6 +8,7 @@ that knows about files.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -15,6 +16,17 @@ import numpy as np
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 
 COLUMNS = ("open", "high", "low", "close", "volume")
+_SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,20}$")
+_INTERVAL_RE = re.compile(r"^([1-9][0-9]*)([mhdw])$")
+_UNIT_MS = {"m": 60_000, "h": 3_600_000, "d": 86_400_000,
+            "w": 604_800_000}
+
+
+def interval_ms(interval: str) -> int:
+    match = _INTERVAL_RE.fullmatch(interval)
+    if not match:
+        raise ValueError(f"unsupported interval {interval!r}")
+    return int(match.group(1)) * _UNIT_MS[match.group(2)]
 
 
 @dataclass
@@ -39,11 +51,18 @@ class Bars:
         )
 
     def validate(self) -> None:
+        if not _SYMBOL_RE.fullmatch(self.symbol):
+            raise ValueError(f"invalid symbol {self.symbol!r}")
+        cadence = interval_ms(self.interval)
         n = len(self.ts)
         if self.ts.ndim != 1 or self.ts.dtype != np.int64:
             raise ValueError("timestamps must be a one-dimensional int64 array")
         if n == 0:
             raise ValueError("bar data is empty")
+        if not bool(np.all(self.ts >= 0)):
+            raise ValueError("timestamps must be non-negative")
+        if not bool(np.all(self.ts % cadence == 0)):
+            raise ValueError("timestamps are not aligned to the declared interval")
         for c in COLUMNS:
             a = getattr(self, c)
             if a.ndim != 1 or a.dtype != np.float32 or len(a) != n:
@@ -51,8 +70,11 @@ class Bars:
             if not bool(np.all(np.isfinite(a))):
                 raise ValueError(f"{c} contains non-finite values")
         if n > 1:
-            if not bool(np.all(np.diff(self.ts) > 0)):
+            delta = np.diff(self.ts)
+            if not bool(np.all(delta > 0)):
                 raise ValueError("timestamps are not strictly increasing")
+            if not bool(np.all(delta % cadence == 0)):
+                raise ValueError("timestamp gaps are not multiples of the declared interval")
         if not bool(np.all(self.low > 0)):
             raise ValueError("prices must be positive")
         if not bool(np.all(self.high >= np.maximum(self.open, self.close))):
@@ -62,8 +84,18 @@ class Bars:
         if not bool(np.all(self.volume >= 0)):
             raise ValueError("volume is negative")
 
+    def missing_intervals(self) -> int:
+        """Count absent bars without silently compressing them out of metadata."""
+        if len(self.ts) < 2:
+            return 0
+        cadence = interval_ms(self.interval)
+        return int(np.sum(np.diff(self.ts) // cadence - 1))
+
 
 def cache_path(symbol: str, interval: str) -> str:
+    if not _SYMBOL_RE.fullmatch(symbol):
+        raise ValueError(f"invalid symbol {symbol!r}")
+    interval_ms(interval)
     return os.path.join(CACHE_DIR, f"{symbol}_{interval}.npz")
 
 
@@ -108,8 +140,11 @@ def list_cached() -> list[dict]:
         symbol, interval = fn[:-4].rsplit("_", 1)
         with np.load(os.path.join(CACHE_DIR, fn)) as z:
             ts = z["ts"]
+            if len(ts) == 0:
+                continue
             out.append({
                 "symbol": symbol, "interval": interval, "bars": int(len(ts)),
                 "start_ms": int(ts[0]), "end_ms": int(ts[-1]),
+                "missing_intervals": int(np.sum(np.diff(ts) // interval_ms(interval) - 1)),
             })
     return out

@@ -15,6 +15,7 @@
 #include <string>
 
 #include "../vm_core.h"
+#include "../program_validate.h"
 
 namespace py = pybind11;
 using namespace bt;
@@ -119,6 +120,9 @@ py::array_t<double> run_batch(u32arr code, farr consts, i32arr kind, i32arr off,
         throw std::runtime_error("program state arrays must have equal lengths");
     if (n_locals < 0 || state_floats < 0)
         throw std::runtime_error("invalid program resource counts");
+    validate_program(code.data(), (int)code.size(), consts.data(), (int)consts.size(),
+                     kind.data(), off.data(), cap.data(), aux.data(), (int)off.size(),
+                     n_locals, state_floats, P);
     if (o.ndim() != 1 || h.ndim() != 1 || l.ndim() != 1 || c.ndim() != 1 ||
         v.ndim() != 1)
         throw std::runtime_error("OHLCV arrays must be one-dimensional");
@@ -127,6 +131,9 @@ py::array_t<double> run_batch(u32arr code, farr consts, i32arr kind, i32arr off,
     if (o.size() != c.size() || h.size() != c.size() || l.size() != c.size() ||
         v.size() != c.size())
         throw std::runtime_error("OHLCV arrays must have equal lengths");
+    validate_run_inputs(o.data(), h.data(), l.data(), c.data(), v.data(), (int)c.size(),
+                        param_matrix.data(), (size_t)N * (size_t)P,
+                        fee, slip, equity0, bars_per_year);
     const int n_code = (int)code.size();
     if (n_code > kMaxSharedCode) throw std::runtime_error("program too large");
     const int T = (int)c.size();

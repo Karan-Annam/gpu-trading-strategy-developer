@@ -7,7 +7,7 @@ import pytest
 from dsl.compiler import compile_source
 from engine import cpu_engine
 from evolve import genome
-from evolve.loop import EvolutionRun
+from evolve.loop import EvolutionRun, Individual
 from tests.util import random_walk_bars
 
 
@@ -76,3 +76,23 @@ def test_miniature_evolution_run(tmp_path):
     assert "holdout" in run.best().stats
     pop = run.population_json()
     assert all("src" in p and p["fitness"] is not None for p in pop)
+
+
+@pytest.mark.skipif(not cpu_engine.available(), reason="btcpu not built")
+def test_guided_injection_is_evaluated_before_selection(tmp_path):
+    bars = random_walk_bars(2500, seed=8)
+    injected = []
+
+    def inject(run, _gen):
+        parent = run.population[0]
+        candidate = Individual(parent.strat, parent.src)
+        injected.append(candidate)
+        return [candidate]
+
+    run = EvolutionRun(bars, pop_size=6, generations=2, n_param_samples=4,
+                       n_folds=2, seed=9, prefer_gpu=False, inject=inject,
+                       run_root=str(tmp_path))
+    run.run()
+    assert run.state == "done", run.error
+    assert injected and injected[0].fitness is not None
+    assert len(run.population) == run.pop_size

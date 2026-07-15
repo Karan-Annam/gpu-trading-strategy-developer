@@ -18,6 +18,10 @@ def test_axis_values_step():
     assert list(vals) == [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60]
     vals2 = sweep.axis_values({"lo": 0.0, "hi": 1.0, "step": None}, steps=11)
     assert len(vals2) == 11
+    with pytest.raises(ValueError, match="positive"):
+        sweep.axis_values({"lo": 0, "hi": 1, "step": 0})
+    with pytest.raises(ValueError, match="positive"):
+        sweep.axis_values({"lo": 0, "hi": 1, "step": -1})
 
 
 def test_build_grid_and_lhs():
@@ -36,6 +40,10 @@ def test_folds_are_ordered_and_cover():
     for (a0, a1), (b0, b1) in fs:
         assert 0 <= a0 < a1 == b0 < b1 <= 1000
     assert fs[-1][1][1] == 1000
+    with pytest.raises(ValueError, match="not enough"):
+        sweep.folds(3, n_folds=4)
+    with pytest.raises(ValueError, match="train_frac"):
+        sweep.folds(100, n_folds=2, train_frac=1.0)
 
 
 @pytest.mark.skipif(not cpu_engine.available(), reason="btcpu not built")

@@ -155,6 +155,8 @@ class Compiler:
         self.code.append(encode(op, arg))
 
     def const(self, v: float) -> int:
+        if not math.isfinite(v) or abs(v) > float(np.finfo(np.float32).max):
+            raise CompileError("constant is outside the finite float32 range")
         v = float(np.float32(v))
         if v not in self.const_ix:
             self.const_ix[v] = len(self.consts)

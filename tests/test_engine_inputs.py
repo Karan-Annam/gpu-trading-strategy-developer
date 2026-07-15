@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from dsl.compiler import compile_source
+from dsl.opcodes import OP
+from dsl.refengine import BacktestConfig
 from engine import cpu_engine, gpu_engine
 from tests.util import make_bars
 
@@ -48,3 +50,39 @@ def test_rejects_mismatched_bar_lengths():
     data.open = data.open[:-1]
     with pytest.raises(ValueError, match="length-20"):
         cpu_engine.run_batch(PROGRAM, data, np.zeros((1, 1), np.float32))
+
+
+@pytest.mark.parametrize("engine", [cpu_engine, gpu_engine])
+def test_native_binding_rejects_stack_underflow(engine):
+    if not engine.available():
+        pytest.skip(f"{engine.__name__} is unavailable")
+    data = bars()
+    arrays = PROGRAM.arrays()
+    code = arrays["code"].copy()
+    code[0] = np.uint32(OP["ADD"] << 24)
+    pm = np.array([[3]], dtype=np.float32)
+    cfg = BacktestConfig()
+    native = engine._load()
+    with pytest.raises(RuntimeError, match="stack underflow"):
+        native.run_batch(
+            code, arrays["consts"], arrays["state_kind"], arrays["state_off"],
+            arrays["state_cap"], arrays["state_aux"], int(arrays["n_locals"]),
+            int(arrays["state_floats"]), data.open, data.high, data.low,
+            data.close, data.volume, pm, cfg.fee_rate, cfg.slip, cfg.equity0,
+            cfg.bars_per_year)
+
+
+def test_native_binding_rejects_nonfinite_params():
+    if not cpu_engine.available():
+        pytest.skip("btcpu is unavailable")
+    data = bars()
+    arrays = PROGRAM.arrays()
+    pm = np.array([[np.nan]], dtype=np.float32)
+    cfg = BacktestConfig()
+    with pytest.raises(RuntimeError, match="non-finite parameter"):
+        cpu_engine._load().run_batch(
+            arrays["code"], arrays["consts"], arrays["state_kind"],
+            arrays["state_off"], arrays["state_cap"], arrays["state_aux"],
+            int(arrays["n_locals"]), int(arrays["state_floats"]),
+            data.open, data.high, data.low, data.close, data.volume, pm,
+            cfg.fee_rate, cfg.slip, cfg.equity0, cfg.bars_per_year)

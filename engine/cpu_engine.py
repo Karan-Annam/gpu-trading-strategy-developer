@@ -24,6 +24,13 @@ _btcpu = None
 
 
 def _validate_bars_layout(bars) -> None:
+    if hasattr(bars, "validate"):
+        bars.validate()
+    if hasattr(bars, "missing_intervals"):
+        missing = bars.missing_intervals()
+        if missing:
+            raise ValueError(
+                f"bar data has {missing} missing intervals; fill or reindex gaps before backtesting")
     close = bars.close
     if close.ndim != 1 or close.dtype != np.float32:
         raise ValueError("close must be a one-dimensional float32 array")
@@ -34,6 +41,16 @@ def _validate_bars_layout(bars) -> None:
         values = getattr(bars, name)
         if values.ndim != 1 or values.dtype != np.float32 or len(values) != n:
             raise ValueError(f"{name} must be a length-{n} float32 array")
+        if not bool(np.all(np.isfinite(values))):
+            raise ValueError(f"{name} contains non-finite values")
+    if not bool(np.all(bars.low > 0)):
+        raise ValueError("prices must be positive")
+    if not bool(np.all(bars.high >= np.maximum(bars.open, bars.close))):
+        raise ValueError("high is below open or close")
+    if not bool(np.all(bars.low <= np.minimum(bars.open, bars.close))):
+        raise ValueError("low is above open or close")
+    if not bool(np.all(bars.volume >= 0)):
+        raise ValueError("volume is negative")
 
 
 def _param_matrix(program: Program, values: np.ndarray) -> np.ndarray:
@@ -43,7 +60,20 @@ def _param_matrix(program: Program, values: np.ndarray) -> np.ndarray:
         raise ValueError(f"param_matrix must have shape (N, {expected})")
     if matrix.shape[0] == 0:
         raise ValueError("param_matrix must contain at least one row")
+    if not bool(np.all(np.isfinite(matrix))):
+        raise ValueError("param_matrix contains non-finite values")
+    for j, spec in enumerate(program.params):
+        if bool(np.any(matrix[:, j] < spec["lo"])) or bool(np.any(matrix[:, j] > spec["hi"])):
+            raise ValueError(f"parameter {spec['name']} is outside its declared range")
     return matrix
+
+
+def _param_vector(program: Program, values) -> np.ndarray:
+    vector = np.ascontiguousarray(values, dtype=np.float32)
+    if vector.ndim != 1 or len(vector) != len(program.params):
+        raise ValueError(f"params must contain {len(program.params)} values")
+    _param_matrix(program, vector.reshape(1, -1))
+    return vector
 
 
 def _load():
@@ -78,13 +108,14 @@ def run(program: Program, bars, params: list[float] | None = None,
     m = _load()
     cfg = config or BacktestConfig()
     _validate_bars_layout(bars)
-    pvals = np.asarray(params if params is not None else program.param_defaults(),
-                       dtype=np.float32)
-    if pvals.ndim != 1 or len(pvals) != len(program.params):
-        raise ValueError(f"params must contain {len(program.params)} values")
+    pvals = _param_vector(
+        program, params if params is not None else program.param_defaults())
     out = m.run_single(*_engine_args(program, bars), pvals,
                        cfg.fee_rate, cfg.slip, cfg.equity0, cfg.bars_per_year,
                        record_locals)
+    if (not bool(np.all(np.isfinite(out["equity"]))) or
+            not all(np.isfinite(value) for value in out["metrics"].values())):
+        raise FloatingPointError("CPU engine produced non-finite results")
     trades = [Trade(**t) for t in out["trades"]]
     metrics = dict(out["metrics"])
     metrics["total_return"] = float(metrics["total_return"])
@@ -98,5 +129,8 @@ def run_batch(program: Program, bars, param_matrix: np.ndarray,
     cfg = config or BacktestConfig()
     _validate_bars_layout(bars)
     pm = _param_matrix(program, param_matrix)
-    return m.run_batch(*_engine_args(program, bars), pm,
-                       cfg.fee_rate, cfg.slip, cfg.equity0, cfg.bars_per_year)
+    out = m.run_batch(*_engine_args(program, bars), pm,
+                      cfg.fee_rate, cfg.slip, cfg.equity0, cfg.bars_per_year)
+    if not bool(np.all(np.isfinite(out))):
+        raise FloatingPointError("CPU engine produced non-finite metrics")
+    return out

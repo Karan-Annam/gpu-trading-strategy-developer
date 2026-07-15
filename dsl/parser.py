@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from dsl import ast_nodes as A
 from dsl.errors import CompileError
 from dsl.lexer import Tok, tokenize
@@ -78,7 +80,10 @@ class Parser:
             neg = True
         t = self.expect("NUMBER")
         v = float(t.text)
-        return -v if neg else v
+        v = -v if neg else v
+        if not math.isfinite(v):
+            raise CompileError("numeric literal must be finite", t.line, t.col)
+        return v
 
     def param_decl(self) -> A.ParamDecl:
         kw = self.expect("KEYWORD", "param")
@@ -99,6 +104,8 @@ class Parser:
             raise CompileError(f"param {name}: hi < lo", kw.line, kw.col)
         if not (lo <= default <= hi):
             raise CompileError(f"param {name}: default outside [lo, hi]", kw.line, kw.col)
+        if step is not None and step <= 0:
+            raise CompileError(f"param {name}: step must be positive", kw.line, kw.col)
         return A.ParamDecl(name, default, lo, hi, step, line=kw.line, col=kw.col)
 
     def let_decl(self) -> A.LetDecl:

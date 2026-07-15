@@ -8,7 +8,7 @@ from data.ohlcv import Bars
 
 def bars() -> Bars:
     return Bars(
-        "TEST", "1m", np.array([1, 2], dtype=np.int64),
+        "TEST", "1m", np.array([60_000, 120_000], dtype=np.int64),
         np.array([100, 101], dtype=np.float32),
         np.array([102, 103], dtype=np.float32),
         np.array([99, 100], dtype=np.float32),

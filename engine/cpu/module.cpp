@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "../vm_core.h"
+#include "../program_validate.h"
 
 namespace py = pybind11;
 using namespace bt;
@@ -41,6 +42,9 @@ ProgramView make_prog(const u32arr& code, const farr& consts, const i32arr& kind
         throw std::runtime_error("program state arrays must have equal lengths");
     if (n_locals < 0 || state_floats < 0 || n_params < 0 || n_params > 16)
         throw std::runtime_error("invalid program resource counts");
+    validate_program(code.data(), (int)code.size(), consts.data(), (int)consts.size(),
+                     kind.data(), off.data(), cap.data(), aux.data(), (int)off.size(),
+                     n_locals, state_floats, n_params);
     ProgramView p;
     p.code = code.data();
     p.n_code = (int)code.size();
@@ -91,6 +95,9 @@ py::dict run_single(u32arr code, farr consts, i32arr kind, i32arr off, i32arr ca
     ProgramView prog = make_prog(code, consts, kind, off, cap, aux, n_locals,
                                  state_floats, (int)params.size());
     BarsView bars = make_bars(o, h, l, c, v);
+    validate_run_inputs(o.data(), h.data(), l.data(), c.data(), v.data(), bars.T,
+                        params.data(), (size_t)params.size(), fee, slip, equity0,
+                        bars_per_year);
     RunConfig cfg{(float)fee, (float)slip, (float)equity0, bars_per_year};
 
     py::array_t<float> equity(bars.T);
@@ -154,9 +161,13 @@ py::array_t<double> run_batch(u32arr code, farr consts, i32arr kind, i32arr off,
         throw std::runtime_error("param_matrix must be 2-D (N, n_params)");
     int N = (int)param_matrix.shape(0);
     int P = (int)param_matrix.shape(1);
+    if (N <= 0) throw std::runtime_error("param_matrix must not be empty");
     ProgramView prog = make_prog(code, consts, kind, off, cap, aux, n_locals,
                                  state_floats, P);
     BarsView bars = make_bars(o, h, l, c, v);
+    validate_run_inputs(o.data(), h.data(), l.data(), c.data(), v.data(), bars.T,
+                        param_matrix.data(), (size_t)N * (size_t)P,
+                        fee, slip, equity0, bars_per_year);
     RunConfig cfg{(float)fee, (float)slip, (float)equity0, bars_per_year};
 
     py::array_t<double> out({(size_t)N, (size_t)7});

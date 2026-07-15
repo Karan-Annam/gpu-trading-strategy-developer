@@ -13,6 +13,7 @@ import os
 import random
 import sys
 import time
+import uuid
 
 import numpy as np
 
@@ -51,12 +52,16 @@ def evaluate(ind: Individual, bars, n_param_samples: int, n_folds: int,
     validation = sweep.validation_metrics(
         prog, bars, pm, n_folds=n_folds, prefer_gpu=prefer_gpu)
     scores = sweep.robust_score(validation)                 # (N,)
-    med_trades = float(np.median(validation[:, :, sweep.COL["n_trades"]]))
+    if not bool(np.all(np.isfinite(scores))):
+        raise ValueError("strategy produced non-finite validation scores")
     q75 = float(np.quantile(scores, 0.75))
-    fitness = q75 - COMPLEXITY_PENALTY * len(prog.code)
-    if med_trades < MIN_TRADES_PER_FOLD:
-        fitness -= NO_TRADE_PENALTY
     best_row = int(np.argmax(scores))
+    best_trades = validation[:, best_row, sweep.COL["n_trades"]]
+    med_trades = float(np.median(best_trades))
+    min_trades = float(np.min(best_trades))
+    fitness = q75 - COMPLEXITY_PENALTY * len(prog.code)
+    if min_trades < MIN_TRADES_PER_FOLD:
+        fitness -= NO_TRADE_PENALTY
     ind.fitness = float(fitness)
     ind.stats = {
         "validation_q75_score": q75,
@@ -64,6 +69,7 @@ def evaluate(ind: Individual, bars, n_param_samples: int, n_folds: int,
         "best_params": {p["name"]: float(pm[best_row, j])
                         for j, p in enumerate(prog.params)},
         "median_validation_trades": med_trades,
+        "min_validation_trades": min_trades,
         "mean_validation_sharpe": float(
             validation[:, :, sweep.COL["sharpe"]].mean()),
         "n_ops": len(prog.code),
@@ -97,18 +103,27 @@ def seed_population(rng: random.Random, pop_size: int) -> list[Individual]:
 
 
 def next_generation(pop: list[Individual], rng: random.Random, elite: int = 2,
-                    p_crossover: float = 0.4) -> list[Individual]:
-    ranked = sorted(pop, key=lambda i: i.fitness, reverse=True)
+                    p_crossover: float = 0.4,
+                    target_size: int | None = None) -> list[Individual]:
+    evaluated = [ind for ind in pop if ind.fitness is not None]
+    if not evaluated:
+        raise ValueError("next_generation requires evaluated individuals")
+    target_size = len(pop) if target_size is None else target_size
+    if target_size < 1:
+        raise ValueError("target_size must be positive")
+    ranked = sorted(evaluated, key=lambda i: i.fitness, reverse=True)
+    elite = min(elite, target_size, len(ranked))
     out = [Individual(ranked[i].strat, ranked[i].src) for i in range(elite)]
     for i in range(elite):                     # elites keep their evaluation
         out[i].fitness = ranked[i].fitness
         out[i].stats = ranked[i].stats
 
     def tournament() -> Individual:
-        return max(rng.sample(pop, k=min(3, len(pop))), key=lambda i: i.fitness)
+        return max(rng.sample(evaluated, k=min(3, len(evaluated))),
+                   key=lambda i: i.fitness)
 
-    while len(out) < len(pop):
-        if rng.random() < p_crossover and len(pop) >= 2:
+    while len(out) < target_size:
+        if rng.random() < p_crossover and len(evaluated) >= 2:
             child = genome.crossover(tournament().strat, tournament().strat, rng)
         else:
             child = genome.mutate(tournament().strat, rng)
@@ -132,6 +147,8 @@ class EvolutionRun:
         split = int(len(bars) * (1.0 - holdout_frac))
         if split < 100 or len(bars) - split < 20:
             raise ValueError("not enough bars for search and final holdout")
+        if pop_size < 2 or generations < 1 or n_param_samples < 1 or n_folds < 1:
+            raise ValueError("invalid evolution resource counts")
         self.bars = bars.slice(0, split)
         self.holdout_bars = bars.slice(split, len(bars))
         self.pop_size = pop_size
@@ -149,7 +166,8 @@ class EvolutionRun:
         self.error: str | None = None
         ts = time.strftime("%Y%m%d_%H%M%S")
         self.run_dir = os.path.join(
-            run_root, f"run_{ts}{('_' + label) if label else ''}")
+            run_root, f"run_{ts}_{uuid.uuid4().hex[:8]}"
+            f"{('_' + label) if label else ''}")
 
     # ---- status for the Lab ----
     def status(self) -> dict:
@@ -204,9 +222,17 @@ class EvolutionRun:
                 if self.stop_requested or g == self.generations - 1:
                     break
                 if self.inject is not None:
-                    for ind in (self.inject(self, g) or []):
+                    for j, ind in enumerate(self.inject(self, g) or []):
+                        try:
+                            evaluate(ind, self.bars, self.n_param_samples,
+                                     self.n_folds,
+                                     rng_seed=(g + 1) * 100_000 + j,
+                                     prefer_gpu=self.prefer_gpu)
+                        except Exception:
+                            continue  # an invalid proposal must not abort a run
                         self.population.append(ind)
-                self.population = next_generation(self.population, self.rng)
+                self.population = next_generation(
+                    self.population, self.rng, target_size=self.pop_size)
             best = self.best()
             if best is not None and not self.stop_requested:
                 evaluate_holdout(best, self.holdout_bars, self.prefer_gpu)
@@ -218,13 +244,17 @@ class EvolutionRun:
 
     def _save_gen(self) -> None:
         path = os.path.join(self.run_dir, f"gen_{self.gen:03d}.json")
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.population_json(), f, indent=1)
+        os.replace(tmp, path)
         best = self.best()
         if best:
-            with open(os.path.join(self.run_dir, "best.dsl"), "w",
-                      encoding="utf-8", newline="\n") as f:
+            best_path = os.path.join(self.run_dir, "best.dsl")
+            best_tmp = best_path + ".tmp"
+            with open(best_tmp, "w", encoding="utf-8", newline="\n") as f:
                 f.write(best.src)
+            os.replace(best_tmp, best_path)
 
 
 def main() -> None:
