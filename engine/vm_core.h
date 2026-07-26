@@ -226,6 +226,7 @@ BT_HD Metrics run_backtest(const ProgramView& prog, const BarsView& bars,
         // 3. run the bar program
         float qsig = (b.side >= 0) ? b.qty : -b.qty;
         float eq_now = b.cash + qsig * bars.c[t];
+        float bars_held = (b.side != 0) ? (float)(t - b.entry_t) : 0.0f;
         int sp = 0;
         bool sig_el = false, sig_xl = false, sig_es = false, sig_xs = false;
         b.cfg_stop = 0.0f; b.cfg_tp = 0.0f; b.cfg_trail = 0.0f; b.cfg_size = 1.0f;
@@ -253,7 +254,8 @@ BT_HD Metrics run_backtest(const ProgramView& prog, const BarsView& bars,
             }
             case OP_PUSH_CTX:
                 stack[sp++] = (arg == 0) ? (float)t : (arg == 1) ? (float)b.side
-                             : (arg == 2) ? b.entry_px : eq_now;
+                             : (arg == 2) ? b.entry_px : (arg == 3) ? eq_now
+                             : bars_held;
                 break;
             case OP_LOAD:  stack[sp++] = locals[arg]; break;
             case OP_STORE: locals[arg] = stack[--sp]; break;

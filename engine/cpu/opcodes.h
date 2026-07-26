@@ -61,6 +61,7 @@ enum Op {
 #define SK_PREV2 4
 #define SK_RAW 5
 #define VM_MAX_STACK 32
+#define VM_N_CTX 5
 
 // series: open=0, high=1, low=2, close=3, volume=4
-// ctx: bar_index=0, position=1, entry_price=2, equity=3
+// ctx: bar_index=0, position=1, entry_price=2, equity=3, bars_held=4

@@ -54,6 +54,17 @@ MINI = [
 
     "param n = 15 in [5, 60]\nparam k = 2 in [1, 4]\n"
     "let m = sma(close, n * k)\nbuy when close > m\nsell when close < m\n",
+
+    # sugar indicators + bars_held ctx
+    "let k = stoch_k(14)\nlet w = willr(14)\n"
+    "buy when k < 20 and w < -80\nsell when k > 80\n",
+
+    "let m = macd(close, 12, 26)\n"
+    "buy when crossover(m, 0)\nsell when crossunder(m, 0) or bars_held >= 100\n",
+
+    "let u = bb_upper(close, 20, 2)\nlet d = bb_lower(close, 20, 2)\n"
+    "let vw = vwap(20)\n"
+    "buy when close < d and close < vw\nsell when close > u\n",
 ]
 
 

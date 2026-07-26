@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Strategy Lab</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314171c'/><path d='M2 12 L6 7 L9 9 L14 3' stroke='%234da3ff' stroke-width='2' fill='none'/></svg>">
 <link rel="stylesheet" href="/static/vendor/codemirror.css">
 <link rel="stylesheet" href="/static/vendor/uplot.css">
 <link rel="stylesheet" href="/static/style.css">
@@ -14,6 +15,7 @@
   <select id="strategySel" title="load strategy"></select>
   <input id="saveName" placeholder="save as..." spellcheck="false">
   <button id="saveBtn">Save</button>
+  <span id="saveMsg"></span>
   <span class="spacer"></span>
   <select id="datasetSel" title="dataset"></select>
   <select id="rangeSel" title="range">
@@ -94,19 +96,30 @@
         <input id="evoHint" class="grow" placeholder="optional hint, e.g. explore exit-logic variations" spellcheck="false">
       </div>
       <div id="evoStatus"></div>
+      <div id="evoFitChart"></div>
+      <div id="evoHoldout"></div>
       <div id="evoPopList"></div>
     </div>
   </section>
   <section id="right">
     <div class="chartBox"><div class="chartTitle">Price &amp; trades</div><div id="priceChart"></div></div>
-    <div class="chartBox"><div class="chartTitle">Equity</div><div id="equityChart"></div></div>
+    <div class="chartBox"><div class="chartTitle">Equity <span class="help" data-tip="Your account value over time. The dashed line is buy &amp; hold - just buying at the start and keeping it.">?</span></div><div id="equityChart"></div></div>
+    <div class="chartBox"><div class="chartTitle">Drawdown <span class="help" data-tip="How far the account is below its own record high at each moment. Shows how deep and how long the losing stretches were.">?</span></div><div id="ddChart"></div></div>
     <div class="chartBox" id="sweepBox" style="display:none">
       <div class="chartTitle" id="sweepTitle">Sweep</div>
       <div id="sweepChart"></div>
       <div id="sweepTip"></div>
+      <div id="sweepLegend" style="display:none"><div id="sweepLegendBar"></div><div id="sweepLegendLabels"></div></div>
       <div id="sweepCaption"></div>
+      <div id="sweepTop"></div>
     </div>
-    <div id="tradesPanel"><h3>Trades <span id="tradeCount"></span></h3>
+    <div class="chartBox" id="pnlBox" style="display:none">
+      <div class="chartTitle">Trade PnL distribution <span class="help" data-tip="How individual trades are spread between losses (red) and wins (green). Healthy strategies usually show many small outcomes and no catastrophic left tail.">?</span> <span id="pnlNote"></span></div>
+      <div id="pnlHist"></div>
+    </div>
+    <div id="tradesPanel">
+      <div class="panelHead"><h3>Trades <span id="tradeCount"></span></h3>
+        <span class="spacer"></span><button id="csvBtn" title="download all received trades as CSV">export CSV</button></div>
       <div id="tradesScroll"><table id="tradesTable"></table></div>
     </div>
   </section>

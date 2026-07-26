@@ -103,11 +103,15 @@ python -m pytest tests -q
 python -m uvicorn lab.server:app --port 8321
 ```
 
-The web app includes a DSL editor, trade/equity charts, parameter-sweep
-heatmaps, walk-forward scoring, and a genetic search. Setting
-`ANTHROPIC_API_KEY` enables idea, refinement, and guided-evolution actions.
-Evolution searches the first 80% of the selected bars and evaluates the final
-selected program and parameters once on a held-out final 20%.
+The web app includes a DSL editor, trade/equity/drawdown charts with a linked
+cursor and a buy-and-hold benchmark, a trade-PnL histogram, a sortable trades
+table with CSV export, parameter-sweep heatmaps with a color legend and a
+top-5 combo list, walk-forward scoring, and a genetic search that charts
+fitness per generation and reports holdout metrics. Metric labels carry "?"
+tooltips with plain-English explanations. Setting `ANTHROPIC_API_KEY` enables
+idea, refinement, and guided-evolution actions. Evolution searches the first
+80% of the selected bars and evaluates the final selected program and
+parameters once on a held-out final 20%.
 
 ## Repository map
 

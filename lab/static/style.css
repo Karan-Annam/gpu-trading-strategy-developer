@@ -7,6 +7,9 @@
   --accent: #4da3ff;
   --green: #3fbf6f;
   --red: #e05555;
+  --grid: #232a35;          /* chart gridlines */
+  --heat-neutral: #2b323d;  /* heatmap zero/low end */
+  --heat-neg: #d1495b;      /* heatmap negative pole */
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -34,6 +37,22 @@ button.primary { background: var(--accent); color: #08111e; font-weight: 600; }
 .badge { font-size: 12px; color: var(--dim); border: 1px solid var(--border);
          border-radius: 10px; padding: 2px 10px; }
 .badge.cpu { color: var(--green); border-color: var(--green); }
+#saveMsg { font: 12px Consolas, monospace; }
+#saveMsg.ok { color: var(--green); }
+#saveMsg.err { color: var(--red); }
+
+/* "?" hover explainer, pure CSS */
+.help { display: inline-block; width: 13px; height: 13px; line-height: 13px;
+        text-align: center; border-radius: 50%; background: var(--heat-neutral);
+        color: var(--dim); font-size: 10px; font-style: normal; cursor: help;
+        position: relative; vertical-align: 1px; text-transform: none;
+        letter-spacing: normal; }
+.help:hover::after {
+  content: attr(data-tip); position: absolute; left: 16px; top: -6px; z-index: 30;
+  width: 240px; background: #0d1117; border: 1px solid var(--border);
+  border-radius: 4px; padding: 6px 9px; font: 12px/1.45 "Segoe UI", system-ui, sans-serif;
+  color: var(--text); white-space: normal; text-align: left;
+}
 
 main { flex: 1; display: flex; min-height: 0; }
 #left { width: 44%; min-width: 380px; display: flex; flex-direction: column;
@@ -105,10 +124,28 @@ main { flex: 1; display: flex; min-height: 0; }
             z-index: 5; white-space: nowrap; }
 #sweepCaption { font-size: 12px; color: var(--dim); padding: 4px 0; }
 #sweepCaption b { color: var(--text); font-weight: 600; }
+#sweepLegend { max-width: 340px; margin-top: 6px; }
+#sweepLegendBar { height: 10px; border-radius: 3px; border: 1px solid var(--border); }
+#sweepLegendLabels { display: flex; justify-content: space-between;
+                     font: 11px Consolas, monospace; color: var(--dim); }
+#sweepTop { margin-top: 2px; }
+.sweepTopRow { display: flex; gap: 10px; align-items: baseline; padding: 2px 4px;
+               font: 12px Consolas, monospace; cursor: pointer; border-radius: 3px; }
+.sweepTopRow:hover { background: #232a36; }
+.sweepTopRow .rank { color: var(--dim); width: 22px; flex: none; }
+.sweepTopRow .val { color: var(--text); width: 64px; text-align: right; flex: none; }
+.sweepTopRow .combo { color: var(--dim); }
 
 #evolvePanel { border-top: 1px solid var(--border); padding: 8px 12px; }
 #evoStatus { font: 12px Consolas, monospace; color: var(--dim); min-height: 16px;
              padding: 2px 0 6px; }
+#evoFitChart { margin-bottom: 4px; }
+#evoHoldout { margin: 4px 0 6px; }
+.holdTitle { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+             color: var(--accent); margin-bottom: 2px; }
+.holdTable { border-collapse: collapse; font: 12px Consolas, monospace; }
+.holdTable td { padding: 2px 14px 2px 0; color: var(--dim); }
+.holdTable b { color: var(--text); font-weight: 600; margin-left: 4px; }
 #evoPopList { max-height: 180px; overflow-y: auto; }
 .evoRow { display: flex; gap: 8px; align-items: baseline; padding: 3px 4px;
           border-bottom: 1px solid #202631; font: 12px Consolas, monospace;
@@ -131,9 +168,23 @@ main { flex: 1; display: flex; min-height: 0; }
 .u-legend { font-size: 11px !important; color: var(--dim) !important; }
 
 #tradesPanel { padding: 8px 12px; border-top: 1px solid var(--border); }
+.panelHead { display: flex; align-items: center; gap: 8px; }
+.panelHead h3 { margin: 0 0 6px; }
+#csvBtn { font-size: 11px; padding: 2px 8px; }
+#pnlNote { font-size: 11px; color: #55606e; text-transform: none; letter-spacing: normal; }
 #tradesScroll { max-height: 200px; overflow-y: auto; }
 #tradesTable { width: 100%; border-collapse: collapse; font: 12px Consolas, monospace; }
 #tradesTable th { text-align: left; color: var(--dim); position: sticky; top: 0;
-                  background: var(--bg); padding: 2px 6px; }
+                  background: var(--bg); padding: 2px 6px; cursor: pointer;
+                  user-select: none; white-space: nowrap; }
+#tradesTable th:hover { color: var(--text); }
 #tradesTable td { padding: 2px 6px; border-bottom: 1px solid #202631; }
 #tradeCount { color: var(--dim); font-weight: normal; }
+
+@media (max-width: 800px) {
+  main { flex-direction: column; overflow-y: auto; }
+  #left { width: 100%; min-width: 0; border-right: none;
+          border-bottom: 1px solid var(--border); }
+  #right { overflow-y: visible; }
+  #editorWrap { min-height: 260px; }
+}

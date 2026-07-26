@@ -55,8 +55,13 @@ def _condition(rng: random.Random) -> A.Node:
             return A.BinOp(f, a, b)
         return A.Call(f, [a, b])
     if kind < 0.65:                       # oscillator vs threshold
-        r = A.Call("rsi", [A.Name("close"), _rand_window(rng)])
-        thr = A.Num(float(rng.randint(15, 85)))
+        osc = rng.choice(["rsi", "stoch_k", "willr"])
+        if osc == "rsi":
+            r = A.Call("rsi", [A.Name("close"), _rand_window(rng)])
+        else:                             # stoch_k / willr take only a window
+            r = A.Call(osc, [_rand_window(rng)])
+        thr = A.Num(float(-rng.randint(15, 85) if osc == "willr"
+                          else rng.randint(15, 85)))
         if rng.random() < 0.5:
             return A.BinOp(rng.choice([">", "<"]), r, thr)
         return A.Call(rng.choice(["crossover", "crossunder"]), [r, thr])
@@ -127,7 +132,9 @@ def strip_params(strat: A.Strategy) -> A.Strategy:
 
 
 WINDOWED = {"sma": 1, "ema": 1, "rsi": 1, "highest": 1, "lowest": 1,
-            "stddev": 1, "atr": 0, "delay": 1, "roc": 1}
+            "stddev": 1, "atr": 0, "delay": 1, "roc": 1,
+            "stoch_k": 0, "willr": 0, "vwap": 0,
+            "macd": 1, "bb_upper": 1, "bb_lower": 1}
 
 
 def parameterize(strat: A.Strategy, max_params: int = 4) -> A.Strategy:

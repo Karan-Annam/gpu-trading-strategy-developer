@@ -2,7 +2,7 @@
 
 Responsibilities:
 - name resolution (params / lets / series / context scalars)
-- desugaring (change, roc)
+- desugaring (change, roc, stoch_k, willr, macd, bb_upper, bb_lower, vwap)
 - static bounding of window arguments via interval arithmetic over param ranges
 - state-slot allocation for stateful call sites
 - stack-depth verification
@@ -25,6 +25,9 @@ from dsl.parser import parse
 
 STATELESS = {"abs": 1, "sqrt": 1, "log": 1, "min": 2, "max": 2}
 STATELESS_OP = {"abs": "ABS", "sqrt": "SQRT", "log": "LOG", "min": "MIN2", "max": "MAX2"}
+# sugar over core builtins; expanded in Compiler.desugar(), no opcodes of their own
+SUGAR_ARGC = {"stoch_k": 1, "willr": 1, "macd": 3,
+              "bb_upper": 3, "bb_lower": 3, "vwap": 1}
 BIN_OP = {
     "+": "ADD", "-": "SUB", "*": "MUL", "/": "DIV",
     ">": "GT", "<": "LT", ">=": "GE", "<=": "LE", "==": "EQ", "!=": "NE",
@@ -301,8 +304,55 @@ class Compiler:
             self.expr(node.args[0])
             self.expr(node.args[1])
             self.emit(f.upper(), si)
+        elif f in SUGAR_ARGC:
+            self.argc(node, SUGAR_ARGC[f])
+            self.expr(self.desugar(node))
         else:
             raise CompileError(f"unknown function {f!r}", node.line, node.col)
+
+    def desugar(self, node: A.Call) -> A.Node:
+        """Expand a sugar builtin into a tree over core builtins.
+
+        A subexpression mentioned twice compiles twice; that costs state only
+        when the argument is not a plain series (raw windows are storage-free).
+        """
+        pos = {"line": node.line, "col": node.col}
+
+        def call(fn: str, *args: A.Node) -> A.Call:
+            return A.Call(fn, list(args), **pos)
+
+        def op(o: str, left: A.Node, right: A.Node) -> A.BinOp:
+            return A.BinOp(o, left, right, **pos)
+
+        def name(nid: str) -> A.Name:
+            return A.Name(nid, **pos)
+
+        f = node.func
+        if f in ("stoch_k", "willr"):
+            n = node.args[0]
+            hh = call("highest", name("high"), n)
+            ll = call("lowest", name("low"), n)
+            span = op("-", call("highest", name("high"), n),
+                          call("lowest", name("low"), n))
+            if f == "stoch_k":   # 100 * (close - LL) / (HH - LL); flat window -> 0
+                return op("/", op("*", A.Num(100.0, **pos),
+                                       op("-", name("close"), ll)), span)
+            # -(100 * (HH - close) / (HH - LL)); flat window -> 0
+            return A.UnaryOp("-", op("/", op("*", A.Num(100.0, **pos),
+                                                  op("-", hh, name("close"))),
+                                       span), **pos)
+        if f == "macd":          # ema(x, fast) - ema(x, slow)
+            x, fast, slow = node.args
+            return op("-", call("ema", x, fast), call("ema", x, slow))
+        if f in ("bb_upper", "bb_lower"):   # sma(x, n) +/- k * stddev(x, n)
+            x, n, k = node.args
+            return op("+" if f == "bb_upper" else "-",
+                      call("sma", x, n), op("*", k, call("stddev", x, n)))
+        if f == "vwap":          # rolling n-bar VWAP, not session VWAP
+            n = node.args[0]
+            return op("/", call("sma", op("*", name("close"), name("volume")), n),
+                           call("sma", name("volume"), n))
+        raise AssertionError(f)
 
     def call_delay(self, x: A.Node, k: A.Node) -> None:
         # ring must hold k+1 values to reach k bars back

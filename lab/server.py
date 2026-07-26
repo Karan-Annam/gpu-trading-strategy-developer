@@ -38,6 +38,7 @@ LIBRARY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library")
 SEEDS = os.path.join(ROOT, "strategies")
 
 REF_ENGINE_BAR_CAP = 60_000   # pure python is ~15k bars/s; keep the UI responsive
+LOWER_IS_BETTER = {"max_dd"}  # sweep metrics where the best cell is the minimum
 
 _bars_cache: dict[tuple[str, str], object] = {}
 
@@ -59,7 +60,7 @@ class RunReq(BaseModel):
     source: str = Field(min_length=1, max_length=100_000)
     symbol: str = Field(default="BTCUSDT", pattern=r"^[A-Z0-9]{2,20}$")
     interval: str = Field(default="1m", pattern=r"^[0-9]+[mhdw]$")
-    last_bars: int = Field(default=43_200, ge=1, le=5_000_000)
+    last_bars: int = Field(default=43_200, ge=0, le=5_000_000)   # 0 = all bars
     params: dict[str, float] = Field(default_factory=dict)
     engine: Literal["auto", "cpu", "ref"] = "auto"
 
@@ -78,7 +79,7 @@ class SweepReq(BaseModel):
     source: str = Field(min_length=1, max_length=100_000)
     symbol: str = Field(default="BTCUSDT", pattern=r"^[A-Z0-9]{2,20}$")
     interval: str = Field(default="1m", pattern=r"^[0-9]+[mhdw]$")
-    last_bars: int = Field(default=129_600, ge=1, le=5_000_000)
+    last_bars: int = Field(default=129_600, ge=0, le=5_000_000)  # 0 = all bars
     x: AxisSpec
     y: AxisSpec | None = None
     fixed: dict[str, float] = Field(default_factory=dict)
@@ -193,6 +194,14 @@ def api_run(req: RunReq):
         "n_trades_total": len(res.trades),
     }
 
+    c0 = float(view.close[0])
+    if c0 > 0:
+        # frictionless buy & hold on the same bars, scaled to starting equity
+        eq0 = float(refengine.BacktestConfig().equity0)
+        bench = eq0 * np.asarray(view.close, dtype=np.float64) / c0
+        out["chart"]["benchmark"] = bench[idx].tolist()
+        out["metrics"]["benchmark_return"] = float(view.close[-1]) / c0 - 1.0
+
     if res.locals_curve is not None and prog.local_names:
         med = float(np.median(view.close))
         overlays = {}
@@ -256,7 +265,8 @@ def api_sweep(req: SweepReq):
     if not bool(np.all(np.isfinite(vals))):
         raise HTTPException(
             422, "strategy produced non-finite sweep metrics; reduce expression or parameter ranges")
-    best_flat = int(np.nanargmax(vals))
+    best_flat = (int(np.nanargmin(vals)) if req.metric in LOWER_IS_BETTER
+                 else int(np.nanargmax(vals)))
     # The implemented DSR approximation expects one return series. Averaged,
     # overlapping fold Sharpes do not meet that assumption, so do not present a
     # misleading probability for fold-validation mode.
@@ -270,6 +280,7 @@ def api_sweep(req: SweepReq):
         "y": ({"name": req.y.name, "values": yv.astype(float).tolist()}
               if req.y else None),
         "metric": req.metric,
+        "lower_is_better": req.metric in LOWER_IS_BETTER,
         "matrix": [[float(v) for v in row] for row in matrix],
         "best": {"params": {p["name"]: float(pm[best_flat, j])
                             for j, p in enumerate(prog.params)},
@@ -285,7 +296,7 @@ def api_sweep(req: SweepReq):
 class EvolveStartReq(BaseModel):
     symbol: str = Field(default="BTCUSDT", pattern=r"^[A-Z0-9]{2,20}$")
     interval: str = Field(default="1m", pattern=r"^[0-9]+[mhdw]$")
-    last_bars: int = Field(default=129_600, ge=125, le=5_000_000)
+    last_bars: int = Field(default=129_600, ge=0, le=5_000_000)  # 0 = all bars
     pop_size: int = Field(default=24, ge=2, le=256)
     generations: int = Field(default=10, ge=1, le=100)
     n_param_samples: int = Field(default=48, ge=1, le=2_048)
@@ -333,11 +344,14 @@ def evolve_start(req: EvolveStartReq):
         view = bars.slice(len(bars.close) - n, len(bars.close))
         inject = (_make_injector(req.llm_hint, req.llm_max_calls)
                   if req.llm_inject and llm.available() else None)
-        _evo_run = EvolutionRun(
-            view, pop_size=req.pop_size, generations=req.generations,
-            n_param_samples=req.n_param_samples, n_folds=req.n_folds,
-            seed=req.seed, prefer_gpu=gpu_engine.available(), inject=inject,
-            label="lab")
+        try:
+            _evo_run = EvolutionRun(
+                view, pop_size=req.pop_size, generations=req.generations,
+                n_param_samples=req.n_param_samples, n_folds=req.n_folds,
+                seed=req.seed, prefer_gpu=gpu_engine.available(), inject=inject,
+                label="lab")
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
         _evo_thread = threading.Thread(target=_evo_run.run, daemon=True)
         _evo_thread.start()
     return {"ok": True, "llm_inject": inject is not None}

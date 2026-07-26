@@ -33,12 +33,18 @@ STATEMENTS (one per line, # comments):
 
 EXPRESSIONS:
   series: open high low close volume; lagged: close[3] (integer literal lag)
-  context: bar_index, position (-1/0/1), entry_price, equity
+  context: bar_index, position (-1/0/1), entry_price, equity,
+           bars_held (bars in the current position; 0 when flat and on the
+           entry bar — great for time exits: exit_long when bars_held >= 240)
   operators: + - * /   > < >= <= == !=   and or not   parentheses
   stateless: abs(x) min(a,b) max(a,b) sqrt(x) log(x)
   indicators: sma(x,n) ema(x,n) rsi(x,n) atr(n) highest(x,n) lowest(x,n)
               stddev(x,n) delay(x,k) crossover(a,b) crossunder(a,b)
-              change(x) roc(x,n)
+              change(x) roc(x,n) stoch_k(n) willr(n) macd(x,fast,slow)
+              bb_upper(x,n,k) bb_lower(x,n,k) vwap(n)
+  notes: stoch_k is 0..100, willr is -100..0; both read 0 on a flat window.
+         macd(x,f,s) = ema(x,f)-ema(x,s). bb_* = sma(x,n) +/- k*stddev(x,n).
+         vwap(n) is a rolling n-bar volume-weighted average price.
 
 HARD RULES:
 - Window args (n, k) must be a literal, a param, or simple arithmetic of

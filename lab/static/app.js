@@ -7,9 +7,9 @@ CodeMirror.defineSimpleMode("btdsl", {
     { regex: /#.*/, token: "comment" },
     { regex: /\b(param|let|set|when|in|step|and|or|not|enter_long|exit_long|enter_short|exit_short|buy|sell|short|cover)\b/,
       token: "keyword" },
-    { regex: /\b(sma|ema|rsi|atr|highest|lowest|stddev|delay|crossover|crossunder|change|roc|abs|min|max|sqrt|log)\b/,
+    { regex: /\b(sma|ema|rsi|atr|highest|lowest|stddev|delay|crossover|crossunder|change|roc|stoch_k|willr|macd|bb_upper|bb_lower|vwap|abs|min|max|sqrt|log)\b/,
       token: "builtin" },
-    { regex: /\b(open|high|low|close|volume|bar_index|position|entry_price|equity|stop_loss|take_profit|trail_stop|size)\b/,
+    { regex: /\b(open|high|low|close|volume|bar_index|position|entry_price|equity|bars_held|stop_loss|take_profit|trail_stop|size)\b/,
       token: "series" },
     { regex: /\d+\.?\d*/, token: "number" },
   ],
@@ -20,9 +20,56 @@ const editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
 });
 
 const $ = (id) => document.getElementById(id);
+
+// ---------- palette (single-sourced from the CSS custom properties) ----------
+const cssVar = (name) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const C = {
+  accent: cssVar("--accent"), green: cssVar("--green"), red: cssVar("--red"),
+  dim: cssVar("--dim"), grid: cssVar("--grid"),
+  heatNeutral: cssVar("--heat-neutral"), heatNeg: cssVar("--heat-neg"),
+};
+const AXIS = { stroke: C.dim, grid: { stroke: C.grid }, ticks: { stroke: C.grid } };
+const SYNC_KEY = "lab-x";   // one cursor across all time-axis charts
+const cursorOpts = () => ({ drag: { x: true, y: false }, sync: { key: SYNC_KEY } });
+function rgba(hex, a) {
+  const c = parseInt(hex.slice(1), 16);
+  return `rgba(${c >> 16},${(c >> 8) & 255},${c & 255},${a})`;
+}
+
 let errorLine = null;
-let priceChart = null, equityChart = null;
+let priceChart = null, equityChart = null, ddChart = null, pnlChart = null;
 let paramSpecs = [];
+
+function selectedDataset() {
+  const v = $("datasetSel").value;
+  if (!v) return { symbol: "BTCUSDT", interval: "1m" };
+  const [symbol, interval] = v.split("|");
+  return { symbol, interval: interval || "1m" };
+}
+
+function flash(el, text, isErr) {
+  el.textContent = text;
+  el.className = isErr ? "err" : "ok";
+  clearTimeout(el._flashT);
+  el._flashT = setTimeout(() => { el.textContent = ""; }, 3000);
+}
+
+// plain-English explanations shown behind the "?" marks
+const METRIC_HELP = {
+  "final equity": "Account value at the end: $10,000 starting capital plus every profit and loss.",
+  "total return": "Percent gained or lost over the whole tested period.",
+  "sharpe (ann.)": "Return earned per unit of risk taken, annualized. Rough guide: above 1 is good, above 2 is excellent, negative is losing.",
+  "max drawdown": "Worst peak-to-valley drop of the equity curve - the most you would have watched yourself lose before it recovered.",
+  "trades": "Completed round trips. Too few and the stats are luck; too many and fees eat the edge.",
+  "win rate": "Share of trades that made money after fees. A high win rate with tiny wins and huge losses still loses overall.",
+  "exposure": "Fraction of the time actually holding a position. The same return with less exposure means less time at risk.",
+  "buy & hold": "What you'd earn just buying at the start and holding, with no fees. If the strategy can't beat this, it isn't adding value.",
+  holdout: "Performance on the final 20% of data that the search never saw. The most honest number here - if it's bad, the strategy just memorized the past.",
+  deflated: "The chance the best cell's Sharpe is pure luck given how many combinations were tried. Lower is more believable; above ~0.05 stay skeptical.",
+};
+const helpSpan = (key) => METRIC_HELP[key]
+  ? `<span class="help" data-tip="${METRIC_HELP[key]}">?</span>` : "";
 
 // ---------- compile (debounced) ----------
 let compileTimer = null;
@@ -104,16 +151,25 @@ async function run() {
   $("runBtn").disabled = true;
   $("runBtn").textContent = "Running...";
   try {
+    const ds = selectedDataset();
     const body = {
       source: editor.getValue(),
-      symbol: $("datasetSel").value || "BTCUSDT",
+      symbol: ds.symbol,
+      interval: ds.interval,
       last_bars: parseInt($("rangeSel").value, 10),
       params: currentParams(),
     };
-    const res = await fetch("/api/run", {
+    const r = await fetch("/api/run", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).then((r) => r.json());
+    });
+    const res = await r.json();
+    if (!r.ok) {
+      $("compileMsg").className = "err";
+      $("compileMsg").textContent =
+        typeof res.detail === "string" ? res.detail : `error ${r.status}`;
+      return;
+    }
     if (!res.ok) {
       $("compileMsg").className = "err";
       $("compileMsg").textContent = `line ${res.error.line}: ${res.error.message}`;
@@ -127,6 +183,7 @@ async function run() {
     renderMetrics(res.metrics, res.bars_used, res.n_trades_total);
     renderCharts(res);
     renderTrades(res.trades, res.n_trades_total);
+    renderPnlHist(res.trades, res.n_trades_total);
   } finally {
     $("runBtn").disabled = false;
     $("runBtn").textContent = "Run ▶";
@@ -143,18 +200,24 @@ function renderMetrics(m, barsUsed, nTrades) {
     ["bars", barsUsed.toLocaleString()],
     ["final equity", fmt(m.final_equity)],
     ["total return", pct(m.total_return), m.total_return >= 0 ? "pos" : "neg"],
+  ];
+  if (m.benchmark_return !== undefined) {
+    rows.push(["buy & hold", pct(m.benchmark_return),
+               m.benchmark_return >= 0 ? "pos" : "neg"]);
+  }
+  rows.push(
     ["sharpe (ann.)", fmt(m.sharpe), m.sharpe >= 0 ? "pos" : "neg"],
     ["max drawdown", pct(m.max_drawdown), "neg"],
     ["trades", nTrades],
     ["win rate", pct(m.win_rate)],
     ["exposure", pct(m.exposure)],
-  ];
+  );
   $("metricsTable").innerHTML = rows.map(([k, v, cls]) =>
-    `<tr><td>${k}</td><td class="${cls || ""}">${v}</td></tr>`).join("");
+    `<tr><td>${k}${helpSpan(k)}</td><td class="${cls || ""}">${v}</td></tr>`).join("");
 }
 
-function chartSize(el) {
-  return { width: el.clientWidth || 600, height: 260 };
+function chartSize(el, height = 260) {
+  return { width: el.clientWidth || 600, height };
 }
 
 function renderCharts(res) {
@@ -162,10 +225,6 @@ function renderCharts(res) {
   // price + overlays + trade markers
   const entries = res.trades.map((t) => [t.entry_ts, t.entry_px]);
   const exits = res.trades.map((t) => [t.exit_ts, t.exit_px]);
-  const markerSeries = (pts) => {
-    const m = new Map(pts.map(([x, y]) => [x, y]));
-    return ch.ts.map((x) => (m.has(x) ? m.get(x) : null));
-  };
   // snap marker x to nearest decimated timestamp
   const snap = (pts) => {
     const arr = new Array(ch.ts.length).fill(null);
@@ -180,7 +239,7 @@ function renderCharts(res) {
   const priceData = [ch.ts, ch.close];
   const priceSeries = [
     {},
-    { label: "close", stroke: "#7c8797", width: 1 },
+    { label: "close", stroke: C.dim, width: 1 },
   ];
   for (const [name, vals] of Object.entries(ch.overlays || {})) {
     priceData.push(vals);
@@ -188,39 +247,144 @@ function renderCharts(res) {
     priceSeries.push({ label: name, stroke: `hsl(${hue} 70% 60%)`, width: 1 });
   }
   priceData.push(snap(entries));
-  priceSeries.push({ label: "entry", stroke: "#3fbf6f", paths: () => null,
-    points: { show: true, size: 7, fill: "#3fbf6f" } });
+  priceSeries.push({ label: "entry", stroke: C.green, paths: () => null,
+    points: { show: true, size: 7, fill: C.green } });
   priceData.push(snap(exits));
-  priceSeries.push({ label: "exit", stroke: "#e05555", paths: () => null,
-    points: { show: true, size: 7, fill: "#e05555" } });
+  priceSeries.push({ label: "exit", stroke: C.red, paths: () => null,
+    points: { show: true, size: 7, fill: C.red } });
 
-  const axisStyle = { stroke: "#7c8797", grid: { stroke: "#232a35" }, ticks: { stroke: "#232a35" } };
   if (priceChart) priceChart.destroy();
   priceChart = new uPlot({
     ...chartSize($("priceChart")), series: priceSeries,
-    axes: [axisStyle, axisStyle], cursor: { drag: { x: true, y: false } },
+    axes: [AXIS, AXIS], cursor: cursorOpts(),
   }, priceData, $("priceChart"));
 
+  const eqData = [ch.ts, ch.equity];
+  const eqSeries = [{},
+    { label: "equity", stroke: C.accent, width: 1.2, fill: rgba(C.accent, 0.07) }];
+  if (ch.benchmark) {
+    eqData.push(ch.benchmark);
+    eqSeries.push({ label: "buy & hold", stroke: C.dim, width: 1, dash: [6, 6] });
+  }
   if (equityChart) equityChart.destroy();
   equityChart = new uPlot({
     ...chartSize($("equityChart")),
-    series: [{}, { label: "equity", stroke: "#4da3ff", width: 1.2, fill: "rgba(77,163,255,0.07)" }],
-    axes: [axisStyle, axisStyle], cursor: { drag: { x: true, y: false } },
-  }, [ch.ts, ch.equity], $("equityChart"));
+    series: eqSeries, axes: [AXIS, AXIS], cursor: cursorOpts(),
+  }, eqData, $("equityChart"));
+
+  // drawdown: how far below its running peak the (decimated) equity curve sits
+  let peak = -Infinity;
+  const dd = ch.equity.map((v) => {
+    peak = Math.max(peak, v);
+    return peak > 0 ? (v - peak) / peak : 0;
+  });
+  if (ddChart) ddChart.destroy();
+  ddChart = new uPlot({
+    ...chartSize($("ddChart"), 120),
+    series: [{}, { label: "drawdown", stroke: C.red, width: 1, fill: rgba(C.red, 0.12) }],
+    axes: [AXIS, { ...AXIS, values: (u, vals) => vals.map((v) => `${(v * 100).toFixed(1)}%`) }],
+    cursor: cursorOpts(),
+  }, [ch.ts, dd], $("ddChart"));
 }
 
+let lastTrades = [], lastTradesTotal = 0;
+let tradeSort = { key: null, dir: -1 };   // key null = newest first
+const TRADE_COLS = [["side", "side"], ["entry", "entry_ts"], ["in", "entry_px"],
+                    ["out", "exit_px"], ["pnl", "pnl"], ["why", "reason"]];
+
 function renderTrades(trades, total) {
-  $("tradeCount").textContent = `(${total}${total > trades.length ? `, showing ${trades.length}` : ""})`;
-  const rows = trades.slice().reverse().slice(0, 500).map((t) => {
+  lastTrades = trades;
+  lastTradesTotal = total;
+  tradeSort = { key: null, dir: -1 };
+  drawTrades();
+}
+
+function drawTrades() {
+  const shown = Math.min(lastTrades.length, 500);
+  $("tradeCount").textContent =
+    `(${lastTradesTotal}${shown < lastTradesTotal ? `, showing ${shown}` : ""})`;
+  let rows = lastTrades.slice();
+  if (tradeSort.key) {
+    const { key, dir } = tradeSort;
+    rows.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * dir);
+  } else {
+    rows.reverse();   // newest first
+  }
+  const head = TRADE_COLS.map(([label, key]) =>
+    `<th data-key="${key}" title="click to sort">${label}` +
+    `${tradeSort.key === key ? (tradeSort.dir > 0 ? " ▴" : " ▾") : ""}</th>`).join("");
+  const body = rows.slice(0, 500).map((t) => {
     const d = (ts) => new Date(ts * 1000).toISOString().slice(0, 16).replace("T", " ");
     const cls = t.pnl >= 0 ? "pos" : "neg";
     return `<tr><td>${t.side > 0 ? "L" : "S"}</td><td>${d(t.entry_ts)}</td>` +
       `<td>${fmt(t.entry_px)}</td><td>${fmt(t.exit_px)}</td>` +
       `<td class="${cls}">${fmt(t.pnl)}</td><td>${t.reason}</td></tr>`;
-  });
-  $("tradesTable").innerHTML =
-    "<tr><th>side</th><th>entry</th><th>in</th><th>out</th><th>pnl</th><th>why</th></tr>" +
-    rows.join("");
+  }).join("");
+  $("tradesTable").innerHTML = `<tr>${head}</tr>` + body;
+  $("tradesTable").querySelectorAll("th").forEach((el) =>
+    el.addEventListener("click", () => {
+      const key = el.dataset.key;
+      if (tradeSort.key === key) tradeSort.dir *= -1;
+      else tradeSort = { key, dir: key === "pnl" || key === "entry_ts" ? -1 : 1 };
+      drawTrades();
+    }));
+}
+
+$("csvBtn").addEventListener("click", () => {
+  if (!lastTrades.length) return;
+  const iso = (ts) => new Date(ts * 1000).toISOString();
+  const lines = ["side,entry_time,exit_time,entry_price,exit_price,pnl,reason"];
+  for (const t of lastTrades) {
+    lines.push([t.side > 0 ? "long" : "short", iso(t.entry_ts), iso(t.exit_ts),
+                t.entry_px, t.exit_px, t.pnl, t.reason].join(","));
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "trades.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// ---------- trade PnL histogram ----------
+function renderPnlHist(trades, total) {
+  const box = $("pnlBox");
+  if (trades.length < 2) {
+    box.style.display = "none";
+    if (pnlChart) { pnlChart.destroy(); pnlChart = null; }
+    return;
+  }
+  box.style.display = "";
+  const pnls = trades.map((t) => t.pnl);
+  let lo = Infinity, hi = -Infinity;
+  for (const p of pnls) { lo = Math.min(lo, p); hi = Math.max(hi, p); }
+  const nb = Math.min(25, Math.max(7, Math.round(Math.sqrt(pnls.length) * 1.5)));
+  const step = (hi - lo) / nb || 1;
+  const centers = [], wins = [], losses = [];
+  for (let i = 0; i < nb; i++) {
+    centers.push(lo + (i + 0.5) * step);
+    wins.push(0);
+    losses.push(0);
+  }
+  for (const p of pnls) {
+    const i = Math.min(nb - 1, Math.max(0, Math.floor((p - lo) / step)));
+    (p >= 0 ? wins : losses)[i]++;
+  }
+  if (pnlChart) pnlChart.destroy();
+  pnlChart = new uPlot({
+    ...chartSize($("pnlHist"), 140),
+    scales: { x: { time: false } },
+    series: [
+      { label: "pnl" },
+      { label: "losses", stroke: C.red, fill: rgba(C.red, 0.45),
+        paths: uPlot.paths.bars({ size: [0.9, 100] }) },
+      { label: "wins", stroke: C.green, fill: rgba(C.green, 0.45),
+        paths: uPlot.paths.bars({ size: [0.9, 100] }) },
+    ],
+    axes: [AXIS, AXIS],
+  }, [centers, losses.map((v) => v || null), wins.map((v) => v || null)], $("pnlHist"));
+  $("pnlNote").textContent =
+    total > trades.length ? `(first ${trades.length} of ${total} trades)` : "";
 }
 
 // ---------- parameter sweep ----------
@@ -238,9 +402,9 @@ function mixHex(h1, h2, t) {
 // diverging for polarity metrics (red - neutral - blue), sequential otherwise
 const METRIC_COLOR = {
   sharpe: { kind: "div" }, total_return: { kind: "div" },
-  max_dd: { kind: "seq", pole: "#d1495b" }, n_trades: { kind: "seq", pole: "#4da3ff" },
+  max_dd: { kind: "seq", pole: C.heatNeg }, n_trades: { kind: "seq", pole: C.accent },
 };
-const NEUTRAL = "#2b323d", NEG = "#d1495b", POS = "#4da3ff";
+const NEUTRAL = C.heatNeutral, NEG = C.heatNeg, POS = C.accent;
 
 function cellColor(v, lo, hi, spec) {
   if (!Number.isFinite(v)) return "#181c22";
@@ -262,11 +426,13 @@ async function doSweep() {
     const y = $("sweepY").value;
     const steps = parseInt($("sweepSteps").value, 10) || 30;
     const t0 = performance.now();
+    const ds = selectedDataset();
     const res = await fetch("/api/sweep", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source: editor.getValue(),
-        symbol: $("datasetSel").value || "BTCUSDT",
+        symbol: ds.symbol,
+        interval: ds.interval,
         last_bars: parseInt($("rangeSel").value, 10),
         x: { name: $("sweepX").value, steps },
         y: y ? { name: y, steps } : null,
@@ -306,7 +472,7 @@ function renderSweep(res) {
   const spec = METRIC_COLOR[res.metric] || { kind: "div" };
   const best = res.best;
   const dsrTxt = best.deflated_sharpe !== null
-    ? ` - deflated Sharpe p=${best.deflated_sharpe.toFixed(3)}` : "";
+    ? ` - deflated Sharpe p=${best.deflated_sharpe.toFixed(3)} ${helpSpan("deflated")}` : "";
   cap.innerHTML = `best ${res.metric}: <b>${best.value.toFixed(3)}</b> at ` +
     Object.entries(best.params).map(([k, v]) => `${k}=${+v.toPrecision(5)}`).join(", ") +
     dsrTxt + " - click a cell to apply";
@@ -317,16 +483,16 @@ function renderSweep(res) {
   box.innerHTML = "";
 
   if (!res.y) {
+    $("sweepLegend").style.display = "none";
     const vals = res.matrix.map((row) => row[0]);
-    const axisStyle = { stroke: "#7c8797", grid: { stroke: "#232a35" },
-                        ticks: { stroke: "#232a35" } };
     sweep1d = new uPlot({
       width: box.parentElement.clientWidth - 24 || 600, height: 240,
       scales: { x: { time: false } },
       series: [{ label: res.x.name },
-               { label: res.metric, stroke: "#4da3ff", width: 1.5 }],
-      axes: [axisStyle, axisStyle],
+               { label: res.metric, stroke: C.accent, width: 1.5 }],
+      axes: [AXIS, AXIS],
     }, [res.x.values, vals], box);
+    renderSweepTop(res);
     return;
   }
 
@@ -374,6 +540,48 @@ function renderSweep(res) {
     if (!c) return;
     applyParams({ [res.x.name]: res.x.values[c[0]], [res.y.name]: res.y.values[c[1]] });
   });
+  renderLegend(lo, hi, spec);
+  renderSweepTop(res);
+}
+
+// color-scale legend built from the same cellColor mapping as the heatmap
+function renderLegend(lo, hi, spec) {
+  const bar = $("sweepLegendBar"), labels = $("sweepLegendLabels");
+  $("sweepLegend").style.display = "";
+  if (spec.kind === "div") {
+    const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
+    bar.style.background = `linear-gradient(to right, ` +
+      `${cellColor(-m, -m, m, spec)}, ${cellColor(0, -m, m, spec)}, ${cellColor(m, -m, m, spec)})`;
+    labels.innerHTML =
+      `<span>${(-m).toFixed(2)}</span><span>0</span><span>${m.toFixed(2)}</span>`;
+  } else {
+    bar.style.background = `linear-gradient(to right, ` +
+      `${cellColor(lo, lo, hi, spec)}, ${cellColor(hi, lo, hi, spec)})`;
+    labels.innerHTML = `<span>${lo.toFixed(2)}</span><span>${hi.toFixed(2)}</span>`;
+  }
+}
+
+// top-5 parameter combos, honoring the metric's direction
+function renderSweepTop(res) {
+  const cells = [];
+  res.matrix.forEach((row, i) => row.forEach((v, j) => {
+    if (Number.isFinite(v)) cells.push({ v, i, j });
+  }));
+  cells.sort((a, b) => (res.lower_is_better ? a.v - b.v : b.v - a.v));
+  const yvals = res.y ? res.y.values : null;
+  $("sweepTop").innerHTML = cells.slice(0, 5).map((c, r) => {
+    const combo = `${res.x.name}=${+res.x.values[c.i].toPrecision(5)}` +
+      (yvals ? `, ${res.y.name}=${+yvals[c.j].toPrecision(5)}` : "");
+    return `<div class="sweepTopRow" data-i="${c.i}" data-j="${c.j}">` +
+      `<span class="rank">#${r + 1}</span><span class="val">${c.v.toFixed(3)}</span>` +
+      `<span class="combo">${combo}</span></div>`;
+  }).join("");
+  $("sweepTop").querySelectorAll(".sweepTopRow").forEach((el) =>
+    el.addEventListener("click", () => {
+      const vals = { [res.x.name]: res.x.values[+el.dataset.i] };
+      if (yvals) vals[res.y.name] = yvals[+el.dataset.j];
+      applyParams(vals);
+    }));
 }
 
 $("sweepBtn").addEventListener("click", doSweep);
@@ -530,11 +738,14 @@ fetch("/api/ai/status").then((r) => r.json()).then((st) => {
 let evoTimer = null;
 
 async function evoStart() {
+  const ds = selectedDataset();
+  const lb = parseInt($("rangeSel").value, 10);   // 0 = all bars
   const res = await fetch("/api/evolve/start", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      symbol: $("datasetSel").value || "BTCUSDT",
-      last_bars: parseInt($("rangeSel").value, 10) || 129600,
+      symbol: ds.symbol,
+      interval: ds.interval,
+      last_bars: Number.isNaN(lb) ? 129600 : lb,
       pop_size: parseInt($("evoPop").value, 10),
       generations: parseInt($("evoGens").value, 10),
       n_folds: parseInt($("evoFolds").value, 10),
@@ -542,7 +753,12 @@ async function evoStart() {
       llm_hint: $("evoHint").value.trim(),
     }),
   });
-  if (res.status === 409) { $("evoStatus").textContent = "a run is already active"; return; }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    $("evoStatus").textContent =
+      typeof err.detail === "string" ? err.detail : `error ${res.status}`;
+    return;
+  }
   $("evoStartBtn").style.display = "none";
   $("evoStopBtn").style.display = "";
   evoPoll();
@@ -557,6 +773,8 @@ async function evoPoll() {
     `${st.state} - gen ${st.generation}/${st.generations}` +
     (h ? ` - best ${h.best_fitness.toFixed(3)}, mean ${h.mean_fitness.toFixed(3)}` : "") +
     (st.error ? ` - ${st.error}` : "");
+  renderEvoFit(st.history);
+  renderHoldout(st);
   const pop = await fetch("/api/evolve/population").then((r) => r.json());
   renderPopulation(pop);
   if (st.state !== "running") {
@@ -565,6 +783,47 @@ async function evoPoll() {
     $("evoStartBtn").style.display = "";
     $("evoStopBtn").style.display = "none";
   }
+}
+
+let evoFit = null;
+
+function renderEvoFit(history) {
+  const box = $("evoFitChart");
+  const h = (history || []).filter((r) => r.best_fitness !== null);
+  if (h.length < 2) {
+    box.innerHTML = "";
+    if (evoFit) { evoFit.destroy(); evoFit = null; }
+    return;
+  }
+  if (evoFit) evoFit.destroy();
+  evoFit = new uPlot({
+    width: box.clientWidth || 380, height: 100,
+    scales: { x: { time: false } },
+    series: [{ label: "gen" },
+             { label: "best", stroke: C.green, width: 1.2 },
+             { label: "mean", stroke: C.dim, width: 1 }],
+    axes: [AXIS, AXIS],
+    legend: { show: false }, cursor: { show: false },
+  }, [h.map((r) => r.gen), h.map((r) => r.best_fitness), h.map((r) => r.mean_fitness)], box);
+}
+
+function renderHoldout(st) {
+  const box = $("evoHoldout");
+  const hold = st.best && st.best.holdout;
+  if (!hold) { box.innerHTML = ""; return; }
+  const pct = (x) => `${(x * 100).toFixed(1)}%`;
+  const wr = hold.n_trades > 0 ? hold.wins / hold.n_trades : 0;
+  const exp = st.holdout_bars > 0 ? hold.exposure_bars / st.holdout_bars : 0;
+  box.innerHTML =
+    `<div class="holdTitle">holdout - data the search never saw ${helpSpan("holdout")}</div>` +
+    `<table class="holdTable"><tr>` +
+    `<td>sharpe<b class="${hold.sharpe >= 0 ? "pos" : "neg"}">${hold.sharpe.toFixed(2)}</b></td>` +
+    `<td>return<b class="${hold.total_return >= 0 ? "pos" : "neg"}">${pct(hold.total_return)}</b></td>` +
+    `<td>max dd<b class="neg">${pct(hold.max_dd)}</b></td>` +
+    `<td>trades<b>${hold.n_trades.toFixed(0)}</b></td>` +
+    `<td>win<b>${pct(wr)}</b></td>` +
+    `<td>exposure<b>${pct(exp)}</b></td>` +
+    `</tr></table>`;
 }
 
 function renderPopulation(pop) {
@@ -611,6 +870,7 @@ async function loadStrategyList(selectName) {
   sel.innerHTML = `<option value="">- load strategy -</option>` + list.map((s) =>
     `<option value="${s.group}/${s.name}">${s.group}: ${s.name}</option>`).join("");
   if (selectName) sel.value = selectName;
+  return list;
 }
 
 $("strategySel").addEventListener("change", async (e) => {
@@ -625,12 +885,21 @@ $("strategySel").addEventListener("change", async (e) => {
 
 $("saveBtn").addEventListener("click", async () => {
   const name = $("saveName").value.trim();
-  if (!name) { alert("enter a name first"); return; }
-  const res = await fetch("/api/strategy", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, source: editor.getValue() }),
-  }).then((r) => r.json());
-  if (res.ok) loadStrategyList(`library/${name}`);
+  if (!name) { flash($("saveMsg"), "enter a name first", true); return; }
+  try {
+    const r = await fetch("/api/strategy", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, source: editor.getValue() }),
+    });
+    const res = await r.json();
+    if (!r.ok || !res.ok) {
+      throw new Error(typeof res.detail === "string" ? res.detail : "save failed");
+    }
+    flash($("saveMsg"), "saved", false);
+    loadStrategyList(`library/${name}`);
+  } catch (e) {
+    flash($("saveMsg"), String(e.message || e), true);
+  }
 });
 
 // ---------- boot ----------
@@ -638,19 +907,53 @@ $("runBtn").addEventListener("click", run);
 window.addEventListener("resize", () => {
   if (priceChart) priceChart.setSize(chartSize($("priceChart")));
   if (equityChart) equityChart.setSize(chartSize($("equityChart")));
+  if (ddChart) ddChart.setSize(chartSize($("ddChart"), 120));
+  if (pnlChart) pnlChart.setSize(chartSize($("pnlHist"), 140));
 });
 
+const DEFAULT_SOURCE = [
+  "# Starter: classic SMA crossover",
+  "param fast = 20 in [5, 100] step 5",
+  "param slow = 100 in [20, 400] step 20",
+  "",
+  "let f = sma(close, fast)",
+  "let s = sma(close, slow)",
+  "",
+  "enter_long when crossover(f, s)",
+  "exit_long when crossunder(f, s)",
+  "",
+].join("\n");
+
 (async function boot() {
-  const ds = await fetch("/api/datasets").then((r) => r.json());
-  $("datasetSel").innerHTML = ds.map((d) =>
-    `<option value="${d.symbol}">${d.symbol} ${d.interval} (${(d.bars / 1e6).toFixed(1)}M bars)</option>`).join("");
-  const st = await fetch("/api/status").then((r) => r.json());
-  const badge = $("engineBadge");
-  badge.textContent = `engine: ${st.cpu_engine ? "cpu" : "python-ref"}`;
-  badge.className = "badge" + (st.cpu_engine ? " cpu" : "");
-  await loadStrategyList();
-  const res = await fetch("/api/strategy/seed/sma_cross").then((r) => r.json());
-  editor.setValue(res.source);
-  $("saveName").value = "sma_cross";
-  await compileNow();
+  try {
+    const ds = await fetch("/api/datasets").then((r) => r.json());
+    $("datasetSel").innerHTML = ds.map((d) =>
+      `<option value="${d.symbol}|${d.interval}">${d.symbol} ${d.interval} (${(d.bars / 1e6).toFixed(1)}M bars)</option>`).join("");
+    const st = await fetch("/api/status").then((r) => r.json());
+    const badge = $("engineBadge");
+    badge.textContent = `engine: ${st.cpu_engine ? "cpu" : "python-ref"}`;
+    badge.className = "badge" + (st.cpu_engine ? " cpu" : "");
+  } catch (e) {
+    console.error("boot:", e);
+  }
+  // starting strategy: preferred seed -> first listed -> built-in default
+  let source = null, name = "sma_cross", picked = "";
+  try {
+    const list = await loadStrategyList();
+    const pick = list.find((s) => s.group === "seed" && s.name === "sma_cross") || list[0];
+    if (pick) {
+      const res = await fetch(`/api/strategy/${pick.group}/${pick.name}`).then((r) => r.json());
+      if (res.source) {
+        source = res.source;
+        name = pick.name;
+        picked = `${pick.group}/${pick.name}`;
+      }
+    }
+  } catch (e) {
+    console.error("boot strategy:", e);
+  }
+  editor.setValue(source || DEFAULT_SOURCE);
+  $("saveName").value = name;
+  if (picked) $("strategySel").value = picked;
+  await compileNow().catch(() => {});
 })();

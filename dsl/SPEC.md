@@ -1,7 +1,11 @@
-# Strategy DSL + VM Specification (v1)
+# Strategy DSL + VM Specification (v1.1)
 
 This document is the contract between the compiler and all three engines
 (Python reference, C++ CPU, CUDA). Any behavioral change bumps the version.
+
+v1.1 is additive: six sugar builtins (`stoch_k willr macd bb_upper bb_lower
+vwap`) and the `bars_held` context scalar. v1 programs compile unchanged to
+identical bytecode.
 
 ## 1. Language
 
@@ -33,7 +37,9 @@ set stop_loss = 0.02                      # risk config, may reference params
 - Series (current bar): `open high low close volume`; lagged: `close[k]`,
   integer literal k ≥ 0, clamped to the first bar (`close[5]` at t=2 reads t=0).
 - Context scalars: `bar_index`, `position` (−1/0/+1), `entry_price` (0 when
-  flat), `equity`.
+  flat), `equity`, `bars_held` (bars since the entry fill: 0 when flat **and on
+  the entry bar**, then t − entry_t. Read during step 3, so a protective exit
+  earlier in the same bar makes it read 0 for the rest of that bar's program).
 - Operators by precedence (low→high): `or`, `and`, `not`, comparisons
   (`> < >= <= == !=`, non-chaining), `+ -`, `* /`, unary `-`, call/index.
 - Booleans are floats: comparisons yield 1.0/0.0, truthy means ≠ 0. `and`/`or`
@@ -62,6 +68,18 @@ bar in program order):
 | `crossunder(a, b)` | mirror image |
 | `change(x)` | sugar: `x − delay(x, 1)` |
 | `roc(x, n)` | sugar: `x / delay(x, n) − 1` (safe divide) |
+| `stoch_k(n)` | sugar: `100·(close − lowest(low,n)) / (highest(high,n) − lowest(low,n))` |
+| `willr(n)` | sugar: `−(100·(highest(high,n) − close) / (highest(high,n) − lowest(low,n)))` |
+| `macd(x, fast, slow)` | sugar: `ema(x, fast) − ema(x, slow)` |
+| `bb_upper(x, n, k)` / `bb_lower(x, n, k)` | sugar: `sma(x, n) ± k·stddev(x, n)` |
+| `vwap(n)` | sugar: `sma(close·volume, n) / sma(volume, n)` — rolling, not session |
+
+Sugar expands before state allocation, so a subexpression the expansion
+mentions twice compiles twice. That costs state only when the argument is not
+a plain series (raw windows are storage-free): `stoch_k`/`willr` use 0 state
+floats, but e.g. `bb_upper(ema(close, 50), 20, 2)` allocates two `ema` slots.
+The guarded divide makes `stoch_k`/`willr` read **0** (not 50/−50) while the
+window is flat.
 
 Window arguments (`n`, `k`) must be **statically boundable**: the compiler
 evaluates them with interval arithmetic over param ranges and errors if the

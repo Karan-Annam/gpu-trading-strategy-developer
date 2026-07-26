@@ -113,7 +113,7 @@ inline void validate_program(const uint32_t* code, int n_code,
             (op == OP_PUSH_PARAM && arg >= static_cast<uint32_t>(n_params)) ||
             (op == OP_PUSH_SERIES && arg >= 5) ||
             (op == OP_PUSH_SERIES_LAG && (arg >> 16) >= 5) ||
-            (op == OP_PUSH_CTX && arg >= 4) ||
+            (op == OP_PUSH_CTX && arg >= VM_N_CTX) ||
             ((op == OP_LOAD || op == OP_STORE) && arg >= static_cast<uint32_t>(n_locals)))
             throw std::runtime_error("bytecode operand is out of bounds");
         int wanted = expected_kind(op);

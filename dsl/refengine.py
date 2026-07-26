@@ -191,6 +191,7 @@ def run(program: Program, bars, params: list[float] | None = None,
 
         # 3. run the bar program
         eq_now = F(cash + qsigned() * c[t])
+        bars_held = F(t - entry_t) if side != 0 else F0
         stack: list[np.float32] = []
         push = stack.append
         pop = stack.pop
@@ -210,7 +211,7 @@ def run(program: Program, bars, params: list[float] | None = None,
                 sid, lag = arg >> 16, arg & 0xFFFF
                 push((o, h, l, c, v)[sid][max(t - lag, 0)])
             elif name == "PUSH_CTX":
-                push((F(t), F(side), entry_px, eq_now)[arg])
+                push((F(t), F(side), entry_px, eq_now, bars_held)[arg])
             elif name == "LOAD":
                 push(locals_[arg])
             elif name == "STORE":

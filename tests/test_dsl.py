@@ -107,3 +107,48 @@ def test_alias_keywords():
     p1 = compile_source("buy when close > 1\nsell when close < 1\n")
     p2 = compile_source("enter_long when close > 1\nexit_long when close < 1\n")
     assert p1.code == p2.code
+
+
+# ---- sugar builtins ----
+
+SUGAR_CASES = [
+    ("stoch_k(14)",
+     "100 * (close - lowest(low, 14)) / (highest(high, 14) - lowest(low, 14))"),
+    ("willr(14)",
+     "-(100 * (highest(high, 14) - close) / (highest(high, 14) - lowest(low, 14)))"),
+    ("macd(close, 12, 26)", "ema(close, 12) - ema(close, 26)"),
+    ("bb_upper(close, 20, 2)", "sma(close, 20) + 2 * stddev(close, 20)"),
+    ("bb_lower(close, 20, 2)", "sma(close, 20) - 2 * stddev(close, 20)"),
+    ("vwap(20)", "sma(close * volume, 20) / sma(volume, 20)"),
+]
+
+
+@pytest.mark.parametrize("sugar,manual", SUGAR_CASES,
+                         ids=[c[0].split("(")[0] for c in SUGAR_CASES])
+def test_sugar_matches_manual(sugar, manual):
+    ps = compile_source(f"let v = {sugar}\nbuy when v > 0\n")
+    pm = compile_source(f"let v = {manual}\nbuy when v > 0\n")
+    assert ps.code == pm.code
+    assert ps.consts == pm.consts
+    assert ps.state_kind == pm.state_kind
+    assert ps.state_cap == pm.state_cap
+    assert ps.state_off == pm.state_off
+    assert ps.state_aux == pm.state_aux
+
+
+def test_sugar_state_cost():
+    # every duplicated window in stoch_k reads a raw series -> storage-free
+    assert compile_source("let k = stoch_k(14)\nbuy when k > 80\n").state_floats == 0
+    # vwap's close*volume numerator is computed -> one ring of 1 + n floats
+    assert compile_source("let v = vwap(20)\nbuy when close > v\n").state_floats == 21
+
+
+@pytest.mark.parametrize("src", [
+    "let x = stoch_k(14, 3)\nbuy when x > 0\n",
+    "let x = macd(close, 12)\nbuy when x > 0\n",
+    "let x = bb_upper(close, 20)\nbuy when x > 0\n",
+    "let x = vwap()\nbuy when x > 0\n",
+])
+def test_sugar_argc_errors(src):
+    with pytest.raises(CompileError, match="argument"):
+        compile_source(src)

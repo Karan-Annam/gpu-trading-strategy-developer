@@ -107,6 +107,19 @@ def test_crossover_fires_once():
     assert res.trades[0].entry_t == 4  # signal t=3, fill next open
 
 
+def test_bars_held_times_the_exit():
+    # bars_held is 0 on the entry bar, so `>= 3` first holds 3 bars after the
+    # fill; the exit signal then fills at the next open
+    res = run("enter_long when bar_index == 10\n"
+              "exit_long when bars_held >= 3\n",
+              random_walk_bars(30), slip=0.0, fee_rate=0.0)
+    assert len(res.trades) == 1
+    tr = res.trades[0]
+    assert tr.reason == "signal"
+    assert tr.entry_t == 11   # signal t=10, fill next open
+    assert tr.exit_t == 15    # bars_held hits 3 at t=14, fill next open
+
+
 def indicator_curve(src_let: str, bars, params=None):
     prog = compile_source(src_let + "buy when close > 999999\n")
     res = refengine.run(prog, bars, params, record_locals=True)

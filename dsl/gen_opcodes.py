@@ -27,7 +27,7 @@ def main() -> None:
     for name, val in [("SK_EMA", SK_EMA), ("SK_WILDER1", SK_WILDER1),
                       ("SK_WILDER2", SK_WILDER2), ("SK_RING", SK_RING),
                       ("SK_PREV2", SK_PREV2), ("SK_RAW", SK_RAW),
-                      ("VM_MAX_STACK", MAX_STACK)]:
+                      ("VM_MAX_STACK", MAX_STACK), ("VM_N_CTX", len(CTX))]:
         lines.append(f"#define {name} {val}")
     lines.append("")
     lines.append("// series: " + ", ".join(f"{k}={v}" for k, v in SERIES.items()))

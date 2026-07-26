@@ -10,7 +10,7 @@ OPCODES = [
     "PUSH_PARAM",       # arg = param index
     "PUSH_SERIES",      # arg = series id (0 open, 1 high, 2 low, 3 close, 4 volume)
     "PUSH_SERIES_LAG",  # arg = sid << 16 | lag
-    "PUSH_CTX",         # arg = 0 bar_index, 1 position, 2 entry_price, 3 equity
+    "PUSH_CTX",         # arg = 0 bar_index, 1 position, 2 entry_price, 3 equity, 4 bars_held
     "LOAD",             # arg = local index
     "STORE",
     # arithmetic / logic (pop 2 or 1, push 1)
@@ -34,7 +34,7 @@ OPCODES = [
 OP = {name: i for i, name in enumerate(OPCODES)}
 
 SERIES = {"open": 0, "high": 1, "low": 2, "close": 3, "volume": 4}
-CTX = {"bar_index": 0, "position": 1, "entry_price": 2, "equity": 3}
+CTX = {"bar_index": 0, "position": 1, "entry_price": 2, "equity": 3, "bars_held": 4}
 
 # state slot kinds (state_kind[] values)
 SK_EMA = 0        # [count, value]
